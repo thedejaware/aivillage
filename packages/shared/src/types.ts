@@ -32,3 +32,46 @@ export interface ProjectCost {
 
 /** Daily energy granted to every twin. This cap is the per-user inference ceiling. */
 export const DAILY_ENERGY = 5;
+
+// --- Wave 1a additions ---
+export type ProjectStatus = "active" | "complete";
+
+export interface Project {
+  id: string;
+  type: ProjectType;
+  zone: string;
+  participantTwinIds: string[];
+  stepsTotal: number;
+  stepsDone: number;
+  status: ProjectStatus;
+}
+
+export interface Reward {
+  skill: SkillName;
+  xp: number;
+  reputation: number;
+}
+
+export interface Structure {
+  id: string;
+  projectId: string;
+  type: ProjectType;
+  zone: string;
+}
+
+export type Verb = "work" | "socialize" | "move";
+
+export interface BeatResult {
+  verb: Verb;
+  target: string | null; // a zone name, a twin name, or null
+  narrative: string;
+}
+
+export interface Memory {
+  id: string;
+  twinId: string;
+  kind: string;
+  content: string;
+  importance: number;
+  createdAt: string; // ISO timestamp
+}

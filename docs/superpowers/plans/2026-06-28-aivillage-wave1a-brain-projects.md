@@ -590,9 +590,9 @@ let twinId: string;
 beforeAll(async () => {
   tdb = await startTestDb();
   repo = new DrizzleMemoryRepository(tdb.db);
-  const client = tdb.db.session.client as unknown as (q: string) => Promise<any[]>;
-  const [u] = await client(`insert into users (email, credits) values ('m@b.com', 0) returning id`);
-  const [t] = await client(
+  const client = tdb.db.session.client as unknown as { unsafe: (q: string) => Promise<any[]> };
+  const [u] = await client.unsafe(`insert into users (email, credits) values ('m@b.com', 0) returning id`);
+  const [t] = await client.unsafe(
     `insert into twins (owner_user_id, name) values ('${u.id}', 'Mehmet') returning id`
   );
   twinId = t.id;

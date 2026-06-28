@@ -30,3 +30,31 @@ export const creditLedger = pgTable("credit_ledger", {
   reason: text("reason").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
+
+export const projects = pgTable("projects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  type: text("type").notNull(),
+  zone: text("zone").notNull(),
+  participantTwinIds: jsonb("participant_twin_ids").$type<string[]>().notNull().default([]),
+  stepsTotal: integer("steps_total").notNull(),
+  stepsDone: integer("steps_done").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const structures = pgTable("structures", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id),
+  type: text("type").notNull(),
+  zone: text("zone").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const memories = pgTable("memories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  twinId: uuid("twin_id").notNull().references(() => twins.id),
+  kind: text("kind").notNull(),
+  content: text("content").notNull(),
+  importance: integer("importance").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});

@@ -30,6 +30,31 @@ const CREATE_SQL = `
     reason text not null,
     created_at timestamptz not null default now()
   );
+  create table projects (
+    id uuid primary key default gen_random_uuid(),
+    type text not null,
+    zone text not null,
+    participant_twin_ids jsonb not null default '[]',
+    steps_total integer not null,
+    steps_done integer not null default 0,
+    status text not null default 'active',
+    created_at timestamptz not null default now()
+  );
+  create table structures (
+    id uuid primary key default gen_random_uuid(),
+    project_id uuid not null references projects(id),
+    type text not null,
+    zone text not null,
+    created_at timestamptz not null default now()
+  );
+  create table memories (
+    id uuid primary key default gen_random_uuid(),
+    twin_id uuid not null references twins(id),
+    kind text not null,
+    content text not null,
+    importance integer not null default 0,
+    created_at timestamptz not null default now()
+  );
 `;
 
 export interface TestDb { db: DB; stop: () => Promise<void>; }
