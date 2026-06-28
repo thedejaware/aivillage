@@ -41,13 +41,24 @@ These were settled during brainstorming and are the foundation of this spec.
 |-------|-----------|-------|
 | World rendering | **PixiJS** (2D WebGL) | Isometric tiles, sprites, speech bubbles. Fork AI Town's renderer. |
 | App shell / UI | **Next.js + React + TypeScript** | Wraps the Pixi canvas; hosts digest, approvals, onboarding. |
-| Application / simulation backend | **Own Node/TypeScript service** (hosted on Railway) | Runs the beat runner, agent calls, projects, economy, approvals, avatar orchestration. Full npm ecosystem + long-running/scheduled jobs. **Chosen over Supabase Edge Functions (Deno)** because Deno Deploy has execution-time limits, no long-running processes, and no arbitrary native deps — wrong fit for the beat runner. |
-| Data · Auth · Realtime · Storage | **Supabase** (Postgres + Auth + Realtime + Storage) | Used as managed data infrastructure, **not compute**. Realtime via **Postgres Changes** for live world updates. |
+| Application / simulation backend | **Own Node/TypeScript service** (Railway) | Runs the beat runner, agent calls, projects, economy, approvals, avatar orchestration. Full npm ecosystem + long-running/scheduled jobs. **Not Supabase Edge (Deno)** — execution-time limits, no long-running processes, no native deps. |
+| Database | **Postgres on Railway** | Same platform as backend. Holds all authoritative state. |
+| Realtime | **Socket.IO in our Node backend** | Backend is sole writer; it emits state changes to subscribed clients directly over WebSockets. No third-party realtime service. |
+| Auth | **Auth.js (NextAuth)** (or Clerk free tier) | Self-hosted login/session. |
+| File storage (avatars) | **Cloudflare R2** | Cheap, no egress fees. |
 | Agent brains | **Claude** (Anthropic API) | Twin reasoning, conversation, project decisions. Latest model id per `claude-api` skill at build time. |
-| Avatar generation | Image model (Nano-Banana-style) | Photo → pixel-art sprite + profile. Orchestrated from our backend. |
-| Background simulation | **Scheduled worker in our backend** | Daily beats + energy caps. Cron in our Node service, not Supabase. |
+| Avatar generation | Image model (Nano-Banana-style) | Photo → pixel-art sprite + profile. Orchestrated from our backend, stored on R2. |
+| Background simulation | **Scheduled worker in our backend** | Daily beats + energy caps. Cron in our Node service. |
 
-> Stack note: **No Convex.** AI Town is Convex-native, but we fork it for **client-side PixiJS rendering + isometric assets only** — its backend/sim logic is reimplemented in *our* Node service. Data flow: **Node backend (authority) → Supabase Postgres → Supabase Realtime (Postgres Changes) → PixiJS client.** Compute and data are cleanly separated. Realtime is gentle (the daily beat budget means periodic, not 60fps, world changes); Broadcast/Presence are deferred (not needed in v1).
+> Stack note: **All-Railway, no Supabase, no Convex.** AI Town is Convex-native, but we fork it for **client-side PixiJS rendering + isometric assets only** — its backend/sim logic is reimplemented in *our* Node service. Data flow: **Node backend (authority) → Postgres (persist) + Socket.IO emit → PixiJS client (render + animate).** Realtime is gentle (the daily beat budget means periodic, not 60fps, world changes). Everything — Next.js web, Node backend, Postgres — hosts on **Railway**; avatars on **R2**.
+
+### 3.1 Database write volume (important)
+The simulation is **event-driven, not a real-time tick.** We persist **discrete events per beat**, not per second:
+- **Per beat** (~5/twin/day): one `beats` row + changed twin fields (energy/zone/skill) + project progress; on completion a `structures` row + reward. → **~5–15 row writes per twin per day.**
+- Conversations persist a **summary/memory**, not every token.
+- **Never persisted:** walking animation, idle motion, speech-bubble timing — the PixiJS client animates these locally from the last discrete state. We store "moved to Plaza" once; the client tweens the walk.
+
+Implication: database load is trivial; **LLM inference is the real cost driver** (governed by the energy cap, §6).
 
 ---
 
@@ -127,7 +138,7 @@ Everything in scope exists to answer this. If yes, B/C become content updates on
 - This parity is a hard architectural requirement and must be covered by tests (an NPC twin and a player twin run through the same planner with the same interface).
 
 ### 7.3 Daily beat runner
-- Runs as a **scheduled worker inside our Node backend** (not a Supabase Edge Function). Grants energy, then for each active twin spends its beats (up to the cap), persists deltas to Supabase Postgres, and queues any human-approval items. Clients see the resulting state changes via Supabase Realtime (Postgres Changes).
+- Runs as a **scheduled worker inside our Node backend**. Grants energy, then for each active twin spends its beats (up to the cap), persists deltas to Postgres, **emits the changes over Socket.IO** to any connected clients, and queues any human-approval items.
 - Idempotent and resumable per twin (a crash mid-run must not double-spend energy or double-place buildings).
 - Real players' pending approvals **gate** the beats that depend on them; non-blocked beats proceed.
 
@@ -146,17 +157,17 @@ Each module has one purpose, a defined interface, and isolated tests. These boun
 | **`projects`** | Project catalog, lifecycle (start→steps→complete), reward application | `advance(project)`, `complete(project)` | economy, data |
 | **`approvals`** | Build digest, route approvals (human vs NPC auto), apply decisions | `buildDigest(user)`, `resolve(decision)` | data |
 | **`onboarding`** | Photo → avatar sprite, personality/goal capture → twin profile | `createTwin(input) → Twin` | image model, data |
-| **`api`** | **Our Node/TS backend** (Railway): HTTP/RPC endpoints + the scheduled beat worker; binds UI ↔ modules | REST/RPC endpoints | all of the above |
-| **`web-ui`** | Next.js/React shell: onboarding flow, world canvas mount, digest & approval screens | React components | api, data (realtime subs) |
-| **`data`** | Supabase schema, typed data-access layer, **Realtime (Postgres Changes) subscriptions** | typed repositories | Supabase |
+| **`api`** | **Our Node/TS backend** (Railway): HTTP/RPC endpoints + Socket.IO server + the scheduled beat worker; binds UI ↔ modules | REST/RPC + WebSocket events | all of the above |
+| **`web-ui`** | Next.js/React shell: onboarding flow, world canvas mount, digest & approval screens; Socket.IO client | React components | api |
+| **`data`** | Postgres schema + typed data-access layer | typed repositories | Postgres (Railway) |
 
 **Rule:** modules talk only through their interfaces. Anyone should understand a module's *what/how-to-use/depends-on* without reading internals.
 
-**Hosting:** `web-ui` (Next.js) on Vercel/Netlify; `api` + simulation worker as our Node service on **Railway**; `data` on **Supabase** (Postgres + Auth + Realtime + Storage). The PixiJS client subscribes to Supabase Realtime for live world updates; our backend is the sole writer of authoritative state.
+**Hosting (all Railway):** `web-ui` (Next.js), `api` + simulation worker (Node service), and `data` (Postgres) all run on **Railway**; avatar images on **Cloudflare R2**; auth via **Auth.js**. The backend is the sole writer of authoritative state and pushes live updates to the PixiJS client over **Socket.IO**.
 
 ---
 
-## 9. Data model (Supabase, initial)
+## 9. Data model (Postgres on Railway, initial)
 
 - **`users`** — auth, credits balance, settings.
 - **`twins`** — `id, owner_user_id (nullable for NPC), name, traits jsonb, goals jsonb, avatar_sprite_url, skills jsonb, reputation int, location_zone, energy int, energy_updated_at, is_npc bool`.

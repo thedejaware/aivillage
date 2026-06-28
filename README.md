@@ -42,11 +42,16 @@ Everything is **one loop**, repeating daily:
 
 | Layer | Technology |
 |-------|-----------|
-| World rendering | **PixiJS** (2D WebGL, isometric) — reskinned from a16z's *AI Town* |
+| World rendering | **PixiJS** (2D WebGL, isometric) — client renderer reskinned from a16z's *AI Town* |
 | App shell / UI | **Next.js + React + TypeScript** |
-| Backend · data · realtime · auth | **Supabase** |
+| Backend + simulation | **Own Node/TS service on Railway** (beat runner, agents, economy) |
+| Database | **Postgres on Railway** |
+| Realtime | **Socket.IO** (backend pushes world updates to clients) |
+| Auth · Storage | **Auth.js** · **Cloudflare R2** (avatars) |
 | Agent brains | **Claude** (Anthropic API) |
 | Avatars | Image model — photo → pixel-art sprite |
+
+> The database stores **discrete events** (~5–15 rows per twin per day), not per-second state — the client animates movement locally. The real cost driver is LLM inference, capped by the daily Energy system.
 
 ## Development approach
 
