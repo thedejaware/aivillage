@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@aivillage/shared": "workspace:*",
+    "@anthropic-ai/sdk": "^0.106.0",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.33.0",
     "postgres": "^3.4.4"
   },
