@@ -1,9 +1,16 @@
-import type { Twin, Wallet, Project, Memory } from "./types.js";
+import type { Twin, Wallet, Project, Memory, Structure } from "./types.js";
 
 /** Persistence boundary for twins. Implemented by the data layer (Drizzle). */
 export interface TwinRepository {
   getById(id: string): Promise<Twin | null>;
   save(twin: Twin): Promise<void>;
+  listAll(): Promise<Twin[]>;
+}
+
+/** Persistence boundary for placed structures (completed projects). */
+export interface StructureRepository {
+  save(structure: Structure): Promise<void>;
+  listAll(): Promise<Structure[]>;
 }
 
 /** Persistence boundary for the credit wallet + ledger. */

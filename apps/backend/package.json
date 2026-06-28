@@ -5,17 +5,23 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "api": "tsx watch src/api/server.ts",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@aivillage/shared": "workspace:*",
     "@anthropic-ai/sdk": "^0.106.0",
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.33.0",
+    "express": "^5.2.1",
     "postgres": "^3.4.4"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^10.13.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.24.0",
     "tsx": "^4.19.0",

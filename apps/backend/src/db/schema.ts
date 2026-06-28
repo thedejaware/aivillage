@@ -44,7 +44,7 @@ export const projects = pgTable("projects", {
 
 export const structures = pgTable("structures", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull().references(() => projects.id),
+  projectId: uuid("project_id"),
   type: text("type").notNull(),
   zone: text("zone").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()

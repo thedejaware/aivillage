@@ -38,7 +38,7 @@ export default function WorldCanvas({ state }: { state: WorldState }) {
         return;
       }
       app = instance;
-      ref.current!.appendChild(app.canvas);
+      ref.current!.replaceChildren(app.canvas);
 
       const ox = app.screen.width / 2;
       const oy = 150;

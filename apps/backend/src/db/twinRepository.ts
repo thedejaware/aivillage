@@ -43,4 +43,22 @@ export class DrizzleTwinRepository implements TwinRepository {
     };
     await this.db.insert(twins).values(row).onConflictDoUpdate({ target: twins.id, set: row });
   }
+
+  async listAll(): Promise<Twin[]> {
+    const rows = await this.db.select().from(twins);
+    return rows.map((r) => ({
+      id: r.id,
+      ownerUserId: r.ownerUserId,
+      name: r.name,
+      traits: r.traits,
+      goals: r.goals,
+      avatarSpriteUrl: r.avatarSpriteUrl,
+      skills: r.skills,
+      reputation: r.reputation,
+      locationZone: r.locationZone,
+      energy: r.energy,
+      energyUpdatedAt: r.energyUpdatedAt.toISOString(),
+      isNpc: r.isNpc
+    }));
+  }
 }

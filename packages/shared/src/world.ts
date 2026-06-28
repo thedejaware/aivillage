@@ -30,6 +30,14 @@ export interface WorldState {
   structures: WorldStructureView[];
 }
 
+/** Canonical zone layout shared by the backend (state building) and the renderer. */
+export const DEFAULT_ZONES: WorldZone[] = [
+  { name: "plaza", col: 3, row: 3 },
+  { name: "maker_space", col: 0, row: 5 },
+  { name: "network_hub", col: 6, row: 0 },
+  { name: "event_space", col: 6, row: 6 }
+];
+
 const PALETTE = [0xff9a5b, 0x3ddc97, 0xffd166, 0x5b8cff, 0xc98cff, 0xff6f9c, 0x5be0c8];
 
 /** Deterministic colour from an id so a twin always renders the same hue. */

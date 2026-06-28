@@ -42,7 +42,7 @@ const CREATE_SQL = `
   );
   create table structures (
     id uuid primary key default gen_random_uuid(),
-    project_id uuid not null references projects(id),
+    project_id uuid,
     type text not null,
     zone text not null,
     created_at timestamptz not null default now()
