@@ -18,11 +18,16 @@ export interface DaySummary {
   structuresBuilt: number;
 }
 
+export interface RunDayOptions {
+  /** Called after each twin's results are persisted — e.g. to broadcast live progress. */
+  onProgress?: () => Promise<void> | void;
+}
+
 /**
  * Run one simulated day for every twin in the DB and persist the results.
  * Each call grants a fresh day of energy so the world keeps moving on demand.
  */
-export async function runDay(llm: LlmClient): Promise<DaySummary> {
+export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<DaySummary> {
   const db = getDb();
   const twinRepo = new DrizzleTwinRepository(db);
   const structRepo = new DrizzleStructureRepository(db);
@@ -54,6 +59,7 @@ export async function runDay(llm: LlmClient): Promise<DaySummary> {
     for (const m of res.memories) {
       await memRepo.append(m);
     }
+    if (opts.onProgress) await opts.onProgress();
   }
 
   return { twinsRun: twins.length, structuresBuilt };

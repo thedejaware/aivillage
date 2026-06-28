@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { io } from "socket.io-client";
 import type { WorldState } from "@aivillage/shared";
 
 const WorldCanvas = dynamic(() => import("../components/WorldCanvas"), { ssr: false });
@@ -9,22 +10,24 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function Page() {
   const [state, setState] = useState<WorldState | null>(null);
+  const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    const r = await fetch(`${API}/api/world`);
-    setState((await r.json()) as WorldState);
-  }, []);
-
   useEffect(() => {
-    load().catch(() => setState(null));
-  }, [load]);
+    const socket = io(API, { transports: ["websocket", "polling"] });
+    socket.on("connect", () => setLive(true));
+    socket.on("disconnect", () => setLive(false));
+    socket.on("world", (w: WorldState) => setState(w)); // pushed on connect, and as the day runs
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   const liveADay = async () => {
     setBusy(true);
     try {
+      // Fire-and-forget: the world updates arrive over the socket as each twin finishes.
       await fetch(`${API}/api/run-day`, { method: "POST" });
-      await load();
     } finally {
       setBusy(false);
     }
@@ -33,8 +36,8 @@ export default function Page() {
   return (
     <main>
       <div style={{ position: "fixed", top: 18, left: 22, zIndex: 10, color: "#eaf0ff", fontSize: 18, opacity: 0.9 }}>
-        AiVillage <span style={{ color: "#5be0c8", fontSize: 11 }}>● LIVE</span>
-        <span style={{ color: "#7f93c4", fontSize: 11, marginLeft: 8 }}>from the database</span>
+        AiVillage <span style={{ color: live ? "#5be0c8" : "#7f93c4", fontSize: 11 }}>● {live ? "LIVE" : "…"}</span>
+        <span style={{ color: "#7f93c4", fontSize: 11, marginLeft: 8 }}>realtime</span>
       </div>
 
       <button
@@ -54,7 +57,7 @@ export default function Page() {
         <WorldCanvas state={state} />
       ) : (
         <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#7f93c4", fontFamily: "monospace" }}>
-          Loading village…
+          Connecting to the village…
         </div>
       )}
     </main>
