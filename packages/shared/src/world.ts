@@ -57,6 +57,13 @@ const OFFSETS = [
   { dc: 0, dr: -1 }
 ];
 
+// Distinct tiles for structures within a zone (first one sits on the zone centre).
+const STRUCT_OFFSETS = [
+  { dc: 0, dr: 0 }, { dc: 1, dr: -1 }, { dc: -1, dr: 1 }, { dc: 1, dr: 1 },
+  { dc: -1, dr: -1 }, { dc: 2, dr: 0 }, { dc: 0, dr: 2 }, { dc: 2, dr: 1 },
+  { dc: 1, dr: 2 }, { dc: -1, dr: 0 }, { dc: 0, dr: -1 }, { dc: 2, dr: 2 }
+];
+
 export interface ToWorldStateInput {
   zones: WorldZone[];
   twins: Twin[];
@@ -89,9 +96,15 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
     };
   });
 
+  // Spread structures across distinct tiles within their zone so the village
+  // visibly fills in as more are built (instead of stacking on one point).
+  const structCountByZone: Record<string, number> = {};
   const structures: WorldStructureView[] = input.structures.map((s) => {
     const z = zoneByName.get(s.zone) ?? fallback;
-    return { id: s.id, type: s.type, col: z.col, row: z.row };
+    const k = structCountByZone[s.zone] ?? 0;
+    structCountByZone[s.zone] = k + 1;
+    const off = STRUCT_OFFSETS[k % STRUCT_OFFSETS.length];
+    return { id: s.id, type: s.type, col: z.col + off.dc, row: z.row + off.dr };
   });
 
   return { zones: input.zones, twins, structures };

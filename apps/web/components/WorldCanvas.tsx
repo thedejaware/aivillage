@@ -22,6 +22,7 @@ const STRUCTURE_COLOR: Record<ProjectType, number> = {
 };
 
 const prettyZone = (name: string) => name.replace(/_/g, " ").toUpperCase();
+const short = (s: string) => (s.length > 60 ? s.slice(0, 58).trimEnd() + "…" : s);
 
 export default function WorldCanvas({ state }: { state: WorldState }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -55,97 +56,99 @@ export default function WorldCanvas({ state }: { state: WorldState }) {
       const world = new Container();
       app.stage.addChild(world);
 
-      // isometric ground covering the coordinate range the world uses, with a margin
-      const minC = -1;
-      const maxC = 8;
-      const minR = -1;
-      const maxR = 8;
+      // isometric ground
       const ground = new Graphics();
-      for (let col = minC; col <= maxC; col++) {
-        for (let row = minR; row <= maxR; row++) {
+      for (let col = -2; col <= 9; col++) {
+        for (let row = -2; row <= 9; row++) {
           const x = isoX(col, row, ox);
           const y = isoY(col, row, oy);
           ground
             .poly([x, y, x + TILE_W / 2, y + TILE_H / 2, x, y + TILE_H, x - TILE_W / 2, y + TILE_H / 2])
             .fill({ color: 0x0e1c3e, alpha: 0.92 })
-            .stroke({ color: 0x2e63a0, alpha: 0.55, width: 1 });
+            .stroke({ color: 0x2e63a0, alpha: 0.5, width: 1 });
         }
       }
       world.addChild(ground);
 
-      // structures (completed projects -> buildings)
-      for (const s of state.structures) {
-        const x = isoX(s.col, s.row, ox);
-        const y = isoY(s.col, s.row, oy);
-        const color = STRUCTURE_COLOR[s.type] ?? 0x5b8cff;
-        const g = new Graphics();
-        g.poly([x, y + 4, x + 14, y + 11, x, y + 18, x - 14, y + 11]).fill({ color: 0x12305c });
-        g.rect(x - 9, y - 18, 18, 24).fill({ color }).stroke({ color: 0xffffff, alpha: 0.12, width: 1 });
-        world.addChild(g);
-      }
+      // structures (completed projects) — spread across tiles, drawn back-to-front
+      const placeables = [
+        ...state.structures.map((s) => ({ kind: "structure" as const, col: s.col, row: s.row, type: s.type })),
+        ...state.twins.map((t) => ({ kind: "twin" as const, ...t }))
+      ].sort((a, b) => a.col + a.row - (b.col + b.row));
 
-      // zone labels
-      for (const z of state.zones) {
-        const label = new Text({
-          text: prettyZone(z.name),
-          style: new TextStyle({ fill: 0x7f93c4, fontSize: 11, fontFamily: "monospace", letterSpacing: 1 })
-        });
-        label.x = isoX(z.col, z.row, ox) - 34;
-        label.y = isoY(z.col, z.row, oy) - 6;
-        world.addChild(label);
-      }
+      const bobbers: { node: Container; phase: number }[] = [];
 
-      // twins, depth-sorted back-to-front
-      const sorted = [...state.twins].sort((a, b) => a.col + a.row - (b.col + b.row));
-      for (const t of sorted) {
-        const x = isoX(t.col, t.row, ox);
-        const y = isoY(t.col, t.row, oy);
+      for (const p of placeables) {
+        const x = isoX(p.col, p.row, ox);
+        const y = isoY(p.col, p.row, oy);
 
+        if (p.kind === "structure") {
+          const color = STRUCTURE_COLOR[p.type] ?? 0x5b8cff;
+          const g = new Graphics();
+          g.poly([x, y + 6, x + 13, y + 12, x, y + 18, x - 13, y + 12]).fill({ color: 0x16315c });
+          g.rect(x - 8, y - 14, 16, 24).fill({ color }).stroke({ color: 0xffffff, alpha: 0.14, width: 1 });
+          g.rect(x - 8, y - 14, 16, 5).fill({ color: 0xffffff, alpha: 0.18 });
+          world.addChild(g);
+          continue;
+        }
+
+        // twin: shadow stays on the ground; the figure + label + bubble bob together
         const shadow = new Graphics();
         shadow.ellipse(x, y + TILE_H / 2 - 2, 10, 4).fill({ color: 0x000000, alpha: 0.45 });
         world.addChild(shadow);
 
+        const node = new Container();
+
         const body = new Graphics();
-        body.roundRect(x - 6, y + TILE_H / 2 - 24, 12, 21, 3).fill({ color: t.colorHex });
-        body.circle(x, y + TILE_H / 2 - 26, 4).fill({ color: t.colorHex });
-        world.addChild(body);
+        body.roundRect(x - 6, y + TILE_H / 2 - 24, 12, 21, 3).fill({ color: p.colorHex });
+        body.circle(x, y + TILE_H / 2 - 26, 4).fill({ color: p.colorHex });
+        node.addChild(body);
 
         const name = new Text({
-          text: (t.flag ? t.flag + " " : "") + t.name,
+          text: (p.flag ? p.flag + " " : "") + p.name,
           style: new TextStyle({ fill: 0xcfe0ff, fontSize: 10, fontFamily: "monospace" })
         });
         name.anchor.set(0.5, 0);
         name.x = x;
         name.y = y + TILE_H / 2 + 2;
-        world.addChild(name);
+        node.addChild(name);
 
-        if (t.say) {
-          const pad = 6;
+        if (p.say) {
+          const pad = 5;
           const txt = new Text({
-            text: t.say,
+            text: short(p.say),
             style: new TextStyle({
               fill: 0xc3d2f0,
-              fontSize: 10,
+              fontSize: 9,
               fontFamily: "monospace",
               wordWrap: true,
-              wordWrapWidth: 140
+              wordWrapWidth: 116
             })
           });
           const bw = txt.width + pad * 2;
           const bh = txt.height + pad * 2;
           const bx = x - bw / 2;
-          const by = y + TILE_H / 2 - 34 - bh;
+          const by = y + TILE_H / 2 - 32 - bh;
 
           const bubble = new Graphics();
-          bubble.roundRect(bx, by, bw, bh, 5).fill({ color: 0x070b16 }).stroke({ color: 0x2f63a0, width: 1 });
-          bubble.poly([x - 4, by + bh, x + 4, by + bh, x, by + bh + 6]).fill({ color: 0x070b16 });
-          world.addChild(bubble);
+          bubble.roundRect(bx, by, bw, bh, 5).fill({ color: 0x070b16, alpha: 0.92 }).stroke({ color: 0x2f63a0, width: 1 });
+          bubble.poly([x - 4, by + bh, x + 4, by + bh, x, by + bh + 6]).fill({ color: 0x070b16, alpha: 0.92 });
+          node.addChild(bubble);
 
           txt.x = bx + pad;
           txt.y = by + pad;
-          world.addChild(txt);
+          node.addChild(txt);
         }
+
+        world.addChild(node);
+        bobbers.push({ node, phase: Math.random() * Math.PI * 2 });
       }
+
+      // gentle idle animation so the world feels alive
+      app.ticker.add(() => {
+        const t = performance.now() / 1000;
+        for (const b of bobbers) b.node.y = Math.sin(t * 1.8 + b.phase) * 3;
+      });
     })();
 
     return () => {
