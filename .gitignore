@@ -3,3 +3,9 @@ node_modules/
 .env*
 .next/
 dist/
+
+# Node / monorepo
+node_modules/
+**/node_modules/
+.turbo/
+drizzle/
