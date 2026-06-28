@@ -41,12 +41,13 @@ These were settled during brainstorming and are the foundation of this spec.
 |-------|-----------|-------|
 | World rendering | **PixiJS** (2D WebGL) | Isometric tiles, sprites, speech bubbles. Fork AI Town's renderer. |
 | App shell / UI | **Next.js + React + TypeScript** | Wraps the Pixi canvas; hosts digest, approvals, onboarding. |
-| Backend / data / realtime / auth | **Supabase** (Postgres + Realtime + Auth + Edge Functions) | Replaces AI Town's Convex. Owner's existing stack. |
+| Application / simulation backend | **Own Node/TypeScript service** (hosted on Railway) | Runs the beat runner, agent calls, projects, economy, approvals, avatar orchestration. Full npm ecosystem + long-running/scheduled jobs. **Chosen over Supabase Edge Functions (Deno)** because Deno Deploy has execution-time limits, no long-running processes, and no arbitrary native deps — wrong fit for the beat runner. |
+| Data · Auth · Realtime · Storage | **Supabase** (Postgres + Auth + Realtime + Storage) | Used as managed data infrastructure, **not compute**. Realtime via **Postgres Changes** for live world updates. |
 | Agent brains | **Claude** (Anthropic API) | Twin reasoning, conversation, project decisions. Latest model id per `claude-api` skill at build time. |
-| Avatar generation | Image model (Nano-Banana-style) | Photo → pixel-art sprite + profile. |
-| Background simulation | Supabase scheduled Edge Functions / cron | Runs daily beats, enforces energy caps. |
+| Avatar generation | Image model (Nano-Banana-style) | Photo → pixel-art sprite + profile. Orchestrated from our backend. |
+| Background simulation | **Scheduled worker in our backend** | Daily beats + energy caps. Cron in our Node service, not Supabase. |
 
-> Stack note: AI Town is Convex-native. The fork strategy keeps AI Town's **PixiJS rendering + game-tick concepts** but reimplements persistence/realtime on Supabase. This boundary is called out as a known integration risk (§11).
+> Stack note: **No Convex.** AI Town is Convex-native, but we fork it for **client-side PixiJS rendering + isometric assets only** — its backend/sim logic is reimplemented in *our* Node service. Data flow: **Node backend (authority) → Supabase Postgres → Supabase Realtime (Postgres Changes) → PixiJS client.** Compute and data are cleanly separated. Realtime is gentle (the daily beat budget means periodic, not 60fps, world changes); Broadcast/Presence are deferred (not needed in v1).
 
 ---
 
@@ -126,7 +127,7 @@ Everything in scope exists to answer this. If yes, B/C become content updates on
 - This parity is a hard architectural requirement and must be covered by tests (an NPC twin and a player twin run through the same planner with the same interface).
 
 ### 7.3 Daily beat runner
-- A scheduled job grants energy, then for each active twin spends its beats (up to the cap), persists deltas, and queues any human-approval items.
+- Runs as a **scheduled worker inside our Node backend** (not a Supabase Edge Function). Grants energy, then for each active twin spends its beats (up to the cap), persists deltas to Supabase Postgres, and queues any human-approval items. Clients see the resulting state changes via Supabase Realtime (Postgres Changes).
 - Idempotent and resumable per twin (a crash mid-run must not double-spend energy or double-place buildings).
 - Real players' pending approvals **gate** the beats that depend on them; non-blocked beats proceed.
 
@@ -145,11 +146,13 @@ Each module has one purpose, a defined interface, and isolated tests. These boun
 | **`projects`** | Project catalog, lifecycle (start→steps→complete), reward application | `advance(project)`, `complete(project)` | economy, data |
 | **`approvals`** | Build digest, route approvals (human vs NPC auto), apply decisions | `buildDigest(user)`, `resolve(decision)` | data |
 | **`onboarding`** | Photo → avatar sprite, personality/goal capture → twin profile | `createTwin(input) → Twin` | image model, data |
-| **`api`** | Next.js routes / Supabase edge functions binding UI ↔ modules | REST/RPC endpoints | all of the above |
-| **`web-ui`** | Next.js/React shell: onboarding flow, world canvas mount, digest & approval screens | React components | api |
-| **`data`** | Supabase schema, typed data-access layer, realtime subscriptions | typed repositories | Supabase |
+| **`api`** | **Our Node/TS backend** (Railway): HTTP/RPC endpoints + the scheduled beat worker; binds UI ↔ modules | REST/RPC endpoints | all of the above |
+| **`web-ui`** | Next.js/React shell: onboarding flow, world canvas mount, digest & approval screens | React components | api, data (realtime subs) |
+| **`data`** | Supabase schema, typed data-access layer, **Realtime (Postgres Changes) subscriptions** | typed repositories | Supabase |
 
 **Rule:** modules talk only through their interfaces. Anyone should understand a module's *what/how-to-use/depends-on* without reading internals.
+
+**Hosting:** `web-ui` (Next.js) on Vercel/Netlify; `api` + simulation worker as our Node service on **Railway**; `data` on **Supabase** (Postgres + Auth + Realtime + Storage). The PixiJS client subscribes to Supabase Realtime for live world updates; our backend is the sole writer of authoritative state.
 
 ---
 
@@ -179,7 +182,7 @@ Each module has one purpose, a defined interface, and isolated tests. These boun
 
 ## 11. Known risks
 
-1. **AI Town fork is Convex-native; we use Supabase.** Reimplementing tick/state/realtime on Supabase is the biggest integration unknown. *Mitigation:* keep only the PixiJS rendering + isometric assets from AI Town initially; treat simulation/persistence as our own from the start. Spike this first.
+1. **AI Town fork — we reuse its renderer, not its backend.** AI Town's simulation is Convex-native; we reimplement simulation/persistence in our own Node backend (which the owner is comfortable owning) and use Supabase for data/realtime. *Mitigation:* fork AI Town for **client-side PixiJS rendering + isometric assets only**; build the sim as normal Node from the start. Lower risk than fighting serverless limits, but the rendering-fork integration (feeding our Supabase-backed world state into AI Town's Pixi layer) should still be spiked first in Wave 0.
 2. **Inference cost.** Bounded by the energy cap, but must be *measured* from day one via `beats.token_cost`. *Mitigation:* cost accounting is a v1 requirement, not an afterthought.
 3. **Content safety.** Autonomous twins generate text/relationships. *Mitigation:* moderation pass on generated narrative; report/hide tools; conservative system prompts.
 4. **Scope creep toward B/C.** *Mitigation:* the in/out list in §4 is binding for v1.
