@@ -1,0 +1,88 @@
+{
+  "zones": [
+    {
+      "name": "plaza",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "name": "maker_space",
+      "col": 0,
+      "row": 5
+    },
+    {
+      "name": "network_hub",
+      "col": 6,
+      "row": 0
+    },
+    {
+      "name": "event_space",
+      "col": 6,
+      "row": 6
+    }
+  ],
+  "twins": [
+    {
+      "id": "t-1",
+      "name": "Mehmet",
+      "colorHex": 5999871,
+      "col": 3,
+      "row": 3,
+      "say": "starting a second tier",
+      "flag": null
+    },
+    {
+      "id": "t-2",
+      "name": "Aiko",
+      "colorHex": 13208831,
+      "col": 4,
+      "row": 3,
+      "say": "tinkering with a gadget",
+      "flag": null
+    },
+    {
+      "id": "t-3",
+      "name": "Daniel",
+      "colorHex": 16740252,
+      "col": 6,
+      "row": 6,
+      "say": "final touches",
+      "flag": null
+    },
+    {
+      "id": "t-4",
+      "name": "Ravi",
+      "colorHex": 6021320,
+      "col": 6,
+      "row": 0,
+      "say": "watering the beds",
+      "flag": null
+    }
+  ],
+  "structures": [
+    {
+      "id": "s-8",
+      "type": "fountain",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "id": "s-16",
+      "type": "workshop",
+      "col": 0,
+      "row": 5
+    },
+    {
+      "id": "s-25",
+      "type": "stage",
+      "col": 6,
+      "row": 6
+    },
+    {
+      "id": "s-32",
+      "type": "garden",
+      "col": 6,
+      "row": 0
+    }
+  ]
+}
