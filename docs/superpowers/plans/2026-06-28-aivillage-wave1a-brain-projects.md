@@ -590,6 +590,7 @@ let twinId: string;
 beforeAll(async () => {
   tdb = await startTestDb();
   repo = new DrizzleMemoryRepository(tdb.db);
+  // @ts-expect-error drizzle 0.33 exposes the raw postgres-js client via session.client
   const client = tdb.db.session.client as unknown as { unsafe: (q: string) => Promise<any[]> };
   const [u] = await client.unsafe(`insert into users (email, credits) values ('m@b.com', 0) returning id`);
   const [t] = await client.unsafe(

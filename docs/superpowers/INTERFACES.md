@@ -36,3 +36,38 @@ functions and the repository ports above. Do not break them without a migration 
 ## Wave 0 status: COMPLETE
 - 7 test files, 29 tests passing (22 economy unit + 7 data integration).
 - Typecheck clean across `@aivillage/shared` and `@aivillage/backend`.
+
+---
+
+# Wave 1a interfaces
+
+## Projects (`apps/backend/src/projects`)
+- `startProject(id, type, zone, participantTwinIds, stepsTotal?) -> Project`
+- `advance(project) -> Project`
+- `isComplete(project) -> boolean`
+- `rewardFor(type) -> Reward`
+- `applyReward(twin, reward) -> Twin`
+
+## Agent-core (`apps/backend/src/agent`)
+- `buildPrompt(twin, ctx: PlanContext) -> string`
+- `parseBeat(raw) -> BeatResult`
+- `planBeat(twin, ctx, llm: LlmClient) -> Promise<BeatResult>`
+- `InMemoryMemoryStore { append(memory), recent(twinId, limit) }`
+- `PlanContext { nearbyTwinNames: string[], recentMemories: Memory[] }`
+
+## New ports (`packages/shared/src/interfaces.ts`)
+- `LlmClient { generate(prompt) -> Promise<string> }` — fake in unit tests; wraps Claude in prod
+- `ProjectRepository { getById, save }` — impl: `DrizzleProjectRepository`
+- `MemoryRepository { append, recent }` — impl: `DrizzleMemoryRepository`
+
+## New domain types (`packages/shared/src/types.ts`)
+- `Project`, `ProjectStatus`, `Reward`, `Structure`, `Verb`, `BeatResult`, `Memory`
+
+## Wave 1a status: COMPLETE
+- 13 test files, 49 tests passing (Wave 0 + projects + agent-core).
+- Built by agent team: `projects-builder` (P1–P3) + `brain-builder` (B1–B3).
+- LLM is mocked in tests via the `LlmClient` port; a real Claude-backed impl comes when we wire the simulation runner (Wave 2).
+
+## Next: Wave 1b
+- `world-render`: wire the PixiJS spike (`apps/web`) to a real `WorldState` (twins, zones, structures) from the backend.
+- `onboarding`: photo → pixel avatar (needs image-model decision) + personality/goal capture → twin profile.
