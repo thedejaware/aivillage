@@ -68,6 +68,27 @@ functions and the repository ports above. Do not break them without a migration 
 - Built by agent team: `projects-builder` (P1–P3) + `brain-builder` (B1–B3).
 - LLM is mocked in tests via the `LlmClient` port; a real Claude-backed impl comes when we wire the simulation runner (Wave 2).
 
-## Next: Wave 1b
-- `world-render`: wire the PixiJS spike (`apps/web`) to a real `WorldState` (twins, zones, structures) from the backend.
-- `onboarding`: photo → pixel avatar (needs image-model decision) + personality/goal capture → twin profile.
+---
+
+# Wave 1b world-render + Wave 2 simulation
+
+## World render (`packages/shared/src/world.ts`, `apps/web`)
+- `WorldState { zones, twins, structures }`, `WorldZone`, `WorldTwinView`, `WorldStructureView`
+- `toWorldState(input) -> WorldState` (pure mapper from domain Twin/Structure)
+- `colorForId(id) -> number`
+- `WorldCanvas({ state })` renders the PixiJS isometric world from a `WorldState`.
+
+## Simulation (`apps/backend/src/sim`)
+- `applyBeat(twin, activeProject, beat, deps: BeatApplyDeps) -> BeatOutcome` (pure: move/work→advance/complete→structure+reward+memory)
+- `runTwinBeats(twin, activeProject, llm, deps: RunDeps) -> Promise<TwinDayResult>` (spend energy, plan+apply each beat, collect digest)
+- `CannedLlmClient` — deterministic `LlmClient` for tests/demos (no API key)
+- `src/sim/demo.ts` — runnable: `pnpm --filter @aivillage/backend exec tsx src/sim/demo.ts` prints a simulated day.
+
+## Status
+- Wave 1b world-render: COMPLETE. Wave 2 simulation core: COMPLETE. 61 tests green total.
+
+## Next
+- Real Claude-backed `LlmClient` (needs Anthropic API key) to replace `CannedLlmClient` in production runs.
+- `onboarding`: photo → pixel avatar (needs image-model decision) + personality/goal capture.
+- `api` (HTTP + Socket.IO) + persist sim results, then swap `apps/web/page.tsx` sample for live backend state.
+- approvals/digest surfacing the owner-in-the-loop decisions.
