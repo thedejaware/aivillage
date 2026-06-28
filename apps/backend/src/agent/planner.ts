@@ -3,14 +3,21 @@ import type { Twin, BeatResult, Verb, LlmClient, Memory } from "@aivillage/share
 export interface PlanContext {
   nearbyTwinNames: string[];
   recentMemories: Memory[];
+  activeProject?: { type: string; stepsDone: number; stepsTotal: number } | null;
 }
 
 export function buildPrompt(twin: Twin, ctx: PlanContext): string {
   const memo = ctx.recentMemories.map((m) => `- ${m.content}`).join("\n") || "- (nothing yet)";
+  const p = ctx.activeProject;
+  const projectLine = p
+    ? `You are partway through building a ${p.type} (${p.stepsDone}/${p.stepsTotal} steps done). Choosing "work" advances it; finishing it leaves a real mark on the village.`
+    : `You haven't started building anything yet. Your aim is tangible progress on your goal — that means choosing "work" to start and build a project.`;
   return [
     `You are ${twin.name}, a resident of AiVillage. Traits: ${twin.traits.join(", ") || "none"}. Goals: ${twin.goals.join(", ") || "none"}.`,
     `You are at zone "${twin.locationZone}". Nearby: ${ctx.nearbyTwinNames.join(", ") || "no one"}.`,
-    `Recent memories:\n${memo}`,
+    projectLine,
+    `Recent things you just did:\n${memo}`,
+    `Energy is limited today, so make it count. Strongly prefer "work" to make real progress on your goal. Use "socialize" only occasionally, and "move" only to reach somewhere you need. Do NOT repeat an action you just did.`,
     `Choose ONE action for this beat. Respond ONLY with strict JSON: {"verb":"work|socialize|move","target":<zone-or-name-or-null>,"narrative":<short sentence>}.`
   ].join("\n");
 }

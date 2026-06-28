@@ -18,6 +18,16 @@ describe("buildPrompt", () => {
     expect(p).toContain("plaza");
     expect(p).toContain("Lena");
   });
+
+  it("nudges toward work and shows active project progress", () => {
+    const p = buildPrompt(twin(), {
+      nearbyTwinNames: [],
+      recentMemories: [],
+      activeProject: { type: "workshop", stepsDone: 2, stepsTotal: 3 }
+    });
+    expect(p).toContain("2/3");
+    expect(p.toLowerCase()).toContain('prefer "work"');
+  });
 });
 
 describe("parseBeat", () => {

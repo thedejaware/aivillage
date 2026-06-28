@@ -36,7 +36,16 @@ export async function runTwinBeats(
     if (!spend.ok) break;
     current = spend.twin;
 
-    const beat = await planBeat(current, deps.contextFor(current), llm);
+    const base = deps.contextFor(current);
+    const ctx: PlanContext = {
+      nearbyTwinNames: base.nearbyTwinNames,
+      // What this twin just did today, newest first — stops it looping the same beat.
+      recentMemories: memories.length ? [...memories].slice(-3).reverse() : base.recentMemories,
+      activeProject: project
+        ? { type: project.type, stepsDone: project.stepsDone, stepsTotal: project.stepsTotal }
+        : null
+    };
+    const beat = await planBeat(current, ctx, llm);
     const outcome = applyBeat(current, project, beat, deps);
 
     current = outcome.twin;
