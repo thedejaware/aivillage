@@ -301,11 +301,9 @@ function reconcile(sc: Scene, s: WorldState): void {
       spr = createTwin(t, sc);
       sc.twins.set(t.id, spr);
     }
-    const h = hash(t.id + ":" + sc.tick);
-    const dc = ((h % 5) - 2) * 0.35;
-    const dr = (((h >> 3) % 5) - 2) * 0.35;
-    spr.tx = isoX(t.col + dc, t.row + dr);
-    spr.ty = isoY(t.col + dc, t.row + dr);
+    // Frames carry real per-beat positions, so walk straight to them.
+    spr.tx = isoX(t.col, t.row);
+    spr.ty = isoY(t.col, t.row);
     if (spr.say !== (t.say ?? null)) {
       spr.say = t.say ?? null;
       updateBubble(spr, t.say ?? "");

@@ -72,6 +72,8 @@ export interface ToWorldStateInput {
   saysByTwinId?: Record<string, string>;
   /** optional flag emoji per twin id */
   flagByTwinId?: Record<string, string>;
+  /** explicit tile position per twin id — overrides zone placement (used for movement/playback) */
+  positionsByTwinId?: Record<string, { col: number; row: number }>;
 }
 
 /** Pure mapper: domain entities -> render state. The renderer never sees domain types. */
@@ -81,16 +83,26 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
   const countByZone: Record<string, number> = {};
 
   const twins: WorldTwinView[] = input.twins.map((t) => {
-    const z = zoneByName.get(t.locationZone) ?? fallback;
-    const n = countByZone[t.locationZone] ?? 0;
-    countByZone[t.locationZone] = n + 1;
-    const off = OFFSETS[n % OFFSETS.length];
+    const override = input.positionsByTwinId?.[t.id];
+    let col: number;
+    let row: number;
+    if (override) {
+      col = override.col;
+      row = override.row;
+    } else {
+      const z = zoneByName.get(t.locationZone) ?? fallback;
+      const n = countByZone[t.locationZone] ?? 0;
+      countByZone[t.locationZone] = n + 1;
+      const off = OFFSETS[n % OFFSETS.length];
+      col = z.col + off.dc;
+      row = z.row + off.dr;
+    }
     return {
       id: t.id,
       name: t.name,
       colorHex: colorForId(t.id),
-      col: z.col + off.dc,
-      row: z.row + off.dr,
+      col,
+      row,
       say: input.saysByTwinId?.[t.id] ?? null,
       flag: input.flagByTwinId?.[t.id] ?? null
     };

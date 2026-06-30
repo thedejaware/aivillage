@@ -64,6 +64,17 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
   const says: Record<string, string> = {};
   const frames: WorldState[] = [];
 
+  const zoneByName = new Map(DEFAULT_ZONES.map((z) => [z.name, z] as const));
+  const positions: Record<string, { col: number; row: number }> = {};
+  for (const w of work) {
+    const z = zoneByName.get(w.twin.locationZone) ?? DEFAULT_ZONES[0];
+    positions[w.twin.id] = { col: z.col, row: z.row };
+  }
+  // Where a twin walks while doing a "work" beat — a little patrol around its zone.
+  const WORK_PATROL = [
+    { dc: 0, dr: 0 }, { dc: 1.6, dr: -0.5 }, { dc: 0.5, dr: 1.6 }, { dc: -1.6, dr: 0.5 }, { dc: -0.5, dr: -1.6 }
+  ];
+
   for (let beat = 0; beat < DAILY_ENERGY; beat++) {
     // Plan every twin's beat in parallel (independent Claude calls).
     await Promise.all(
@@ -97,9 +108,32 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
         newStructures.push(outcome.structure);
         allStructures.push(outcome.structure);
       }
+
+      // Walk the twin somewhere meaningful for this beat.
+      const z = zoneByName.get(w.twin.locationZone) ?? DEFAULT_ZONES[0];
+      const verb = w.pending.verb;
+      const tgt = w.pending.target;
+      if (verb === "move" && tgt && zoneByName.has(tgt)) {
+        const zz = zoneByName.get(tgt)!;
+        positions[w.twin.id] = { col: zz.col, row: zz.row };
+      } else if (verb === "socialize" && tgt) {
+        const other = work.find((o) => o.twin.id !== w.twin.id && o.twin.name === tgt);
+        const op = other ? positions[other.twin.id] : null;
+        const off = WORK_PATROL[beat % WORK_PATROL.length];
+        positions[w.twin.id] = op ? { col: op.col - 1, row: op.row } : { col: z.col + off.dc, row: z.row + off.dr };
+      } else {
+        const off = WORK_PATROL[beat % WORK_PATROL.length];
+        positions[w.twin.id] = { col: z.col + off.dc, row: z.row + off.dr };
+      }
     }
 
-    frames.push(toWorldState({ zones: DEFAULT_ZONES, twins: work.map((w) => w.twin), structures: allStructures, saysByTwinId: says }));
+    frames.push(toWorldState({
+      zones: DEFAULT_ZONES,
+      twins: work.map((w) => w.twin),
+      structures: allStructures,
+      saysByTwinId: says,
+      positionsByTwinId: { ...positions }
+    }));
   }
 
   // Persist final state.
