@@ -1,24 +1,32 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import type { WorldState } from "@aivillage/shared";
 
 const WorldCanvas = dynamic(() => import("../components/WorldCanvas"), { ssr: false });
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const FRAME_MS = 1100;
 
 export default function Page() {
   const [state, setState] = useState<WorldState | null>(null);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
     const socket = io(API, { transports: ["websocket", "polling"] });
     socket.on("connect", () => setLive(true));
     socket.on("disconnect", () => setLive(false));
-    socket.on("world", (w: WorldState) => setState(w)); // pushed on connect, and as the day runs
+    socket.on("world", (w: WorldState) => setState(w)); // current state on connect
+    socket.on("day", ({ frames }: { frames: WorldState[] }) => {
+      // Play the day out beat-by-beat: one frame ~every second.
+      timers.current.forEach(clearTimeout);
+      timers.current = frames.map((f, i) => setTimeout(() => setState(f), i * FRAME_MS));
+    });
     return () => {
+      timers.current.forEach(clearTimeout);
       socket.disconnect();
     };
   }, []);

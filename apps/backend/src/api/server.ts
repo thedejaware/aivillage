@@ -15,11 +15,6 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new IOServer(server, { cors: { origin: "*" } });
 
-/** Broadcast the current world to every connected client. */
-async function emitWorld(): Promise<void> {
-  io.emit("world", await buildWorldState());
-}
-
 io.on("connection", async (socket) => {
   // Send the current world to a newly-connected client immediately.
   socket.emit("world", await buildWorldState());
@@ -39,10 +34,10 @@ app.get("/api/world", async (_req, res) => {
 
 app.post("/api/run-day", async (_req, res) => {
   try {
-    // Push the world after each twin finishes so clients see it build live.
-    const summary = await runDay(chooseLlm(), { onProgress: emitWorld });
-    await emitWorld();
-    res.json(summary);
+    // Step the day, then broadcast the per-beat frames for clients to play back.
+    const { frames, structuresBuilt } = await runDay(chooseLlm());
+    io.emit("day", { frames });
+    res.json({ frames: frames.length, structuresBuilt });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
