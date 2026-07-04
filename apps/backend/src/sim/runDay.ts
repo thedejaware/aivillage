@@ -7,9 +7,11 @@ import { getDb } from "../db/appDb.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleStructureRepository } from "../db/structureRepository.js";
 import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
+import { DrizzleApprovalRepository } from "../db/approvalRepository.js";
 import { spendBeat } from "../economy/energy.js";
 import { planBeat } from "../agent/planner.js";
 import { applyBeat, type BeatApplyDeps } from "./applyBeat.js";
+import { gateProjectStart } from "./approvalGate.js";
 
 const TYPE_BY_ZONE: Record<string, ProjectType> = {
   plaza: "fountain", maker_space: "workshop", event_space: "stage", network_hub: "garden"
@@ -47,6 +49,7 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
   const twinRepo = new DrizzleTwinRepository(db);
   const structRepo = new DrizzleStructureRepository(db);
   const memRepo = new DrizzleMemoryRepository(db);
+  const approvalRepo = new DrizzleApprovalRepository(db);
 
   const loaded = await twinRepo.listAll();
   const work: WorkingTwin[] = loaded.map((t) => ({
@@ -105,6 +108,38 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
     // Apply outcomes sequentially (pure, deterministic order).
     for (const w of work) {
       if (!w.acted || !w.pending) continue;
+
+      // Owner-in-the-loop: a player-owned twin starting a NEW project asks its owner first.
+      if (w.pending.verb === "work" && !w.project && w.twin.ownerUserId) {
+        const [actionable, hasPending] = await Promise.all([
+          approvalRepo.nextActionableForTwin(w.twin.id),
+          approvalRepo.hasPendingForTwin(w.twin.id)
+        ]);
+        const decision = gateProjectStart({ ownerUserId: w.twin.ownerUserId, actionable, hasPending });
+        if (decision.action === "proceed" && decision.consumeApprovalId) {
+          await approvalRepo.markConsumed(decision.consumeApprovalId);
+        } else if (decision.action === "request") {
+          const projectType = TYPE_BY_ZONE[w.twin.locationZone] ?? "fountain";
+          await approvalRepo.create({
+            userId: w.twin.ownerUserId,
+            twinId: w.twin.id,
+            kind: "start_project",
+            payload: { projectType, zone: w.twin.locationZone }
+          });
+          w.pending = {
+            verb: "socialize",
+            target: null,
+            narrative: `${w.twin.name} sketches plans for a ${projectType.replace(/_/g, " ")} and sends them to you for approval.`
+          };
+        } else if (decision.action === "wait") {
+          w.pending = {
+            verb: "socialize",
+            target: null,
+            narrative: `${w.twin.name} is waiting for your go-ahead before starting to build.`
+          };
+        }
+      }
+
       const outcome = applyBeat(w.twin, w.project, w.pending, deps(w.twin.locationZone));
       w.twin = outcome.twin;
       w.project = outcome.project;
