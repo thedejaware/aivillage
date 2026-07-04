@@ -53,6 +53,17 @@ interface TwinSprite {
   say: string | null;
   tx: number;
   ty: number;
+  /** anchor: the twin's "home" spot from the last world frame (wander returns near it) */
+  ax: number;
+  ay: number;
+  /** staggered frame target: applied when the clock passes applyAt */
+  nextTx: number;
+  nextTy: number;
+  applyAt: number;
+  /** ambient life: when to take the next idle stroll */
+  nextWanderAt: number;
+  /** per-twin walking speed so they don't move in lockstep */
+  speed: number;
   walk: number;
   phase: number;
 }
@@ -437,7 +448,15 @@ function createTwin(t: WorldTwinView, sc: Scene): TwinSprite {
   root.zIndex = root.y + 1000; // twins in front of same-row structures
   sc.entities.addChild(root);
 
-  return { root, figure, legL, legR, ring, bubble: null, say: null, tx: root.x, ty: root.y, walk: 0, phase: (hash(t.id) % 628) / 100 };
+  const now = performance.now() / 1000;
+  return {
+    root, figure, legL, legR, ring, bubble: null, say: null,
+    tx: root.x, ty: root.y, ax: root.x, ay: root.y,
+    nextTx: root.x, nextTy: root.y, applyAt: 0,
+    nextWanderAt: now + 1.5 + Math.random() * 4,
+    speed: 0.038 + ((hash(t.id) >> 4) % 28) / 1000, // 0.038–0.066: everyone walks differently
+    walk: 0, phase: (hash(t.id) % 628) / 100
+  };
 }
 
 function updateBubble(spr: TwinSprite, sayText: string): void {
@@ -506,8 +525,14 @@ function reconcile(sc: Scene, s: WorldState): void {
       spr = createTwin(t, sc);
       sc.twins.set(t.id, spr);
     }
-    spr.tx = isoX(t.col, t.row);
-    spr.ty = isoY(t.col, t.row);
+    // Stagger each twin's departure by up to ~0.9s so the crowd never moves in lockstep.
+    const nx = isoX(t.col, t.row);
+    const ny = isoY(t.col, t.row);
+    if (nx !== spr.ax || ny !== spr.ay) {
+      spr.nextTx = nx;
+      spr.nextTy = ny;
+      spr.applyAt = performance.now() / 1000 + Math.random() * 0.9;
+    }
     if (spr.say !== (t.say ?? null)) {
       spr.say = t.say ?? null;
       updateBubble(spr, t.say ?? "");
@@ -524,12 +549,22 @@ function reconcile(sc: Scene, s: WorldState): void {
 function animate(sc: Scene): void {
   const t = performance.now() / 1000;
   for (const spr of sc.twins.values()) {
+    // apply a staggered frame target once its delay elapses
+    if (spr.applyAt > 0 && t >= spr.applyAt) {
+      spr.tx = spr.nextTx;
+      spr.ty = spr.nextTy;
+      spr.ax = spr.nextTx;
+      spr.ay = spr.nextTy;
+      spr.applyAt = 0;
+      spr.nextWanderAt = t + 2.5 + Math.random() * 4;
+    }
+
     const dx = spr.tx - spr.root.x;
     const dy = spr.ty - spr.root.y;
     const dist = Math.hypot(dx, dy);
     if (dist > 0.6) {
-      spr.root.x += dx * 0.055;
-      spr.root.y += dy * 0.055;
+      spr.root.x += dx * spr.speed;
+      spr.root.y += dy * spr.speed;
       spr.walk += 0.33;
       spr.legL.y = Math.sin(spr.walk) * 2.1;
       spr.legR.y = Math.sin(spr.walk + Math.PI) * 2.1;
@@ -538,6 +573,12 @@ function animate(sc: Scene): void {
       spr.legL.y = 0;
       spr.legR.y = 0;
       spr.figure.y = TILE_H / 2 + Math.sin(t * 1.8 + spr.phase) * 1.4;
+      // ambient life: idle twins take a short stroll near their anchor every few seconds
+      if (t >= spr.nextWanderAt) {
+        spr.tx = spr.ax + (Math.random() - 0.5) * TILE_W * 1.5;
+        spr.ty = spr.ay + (Math.random() - 0.5) * TILE_H * 1.5;
+        spr.nextWanderAt = t + 4 + Math.random() * 8;
+      }
     }
     spr.root.zIndex = spr.root.y + 1000;
     const pulse = 1 + Math.sin(t * 2.2 + spr.phase) * 0.12;

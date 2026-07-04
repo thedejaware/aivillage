@@ -71,9 +71,16 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
     positions[w.twin.id] = { col: z.col, row: z.row };
   }
   // Where a twin walks while doing a "work" beat — a little patrol around its zone.
+  // Indexed per-twin (hash offset) so twins move in DIFFERENT directions each beat.
   const WORK_PATROL = [
     { dc: 0, dr: 0 }, { dc: 1.6, dr: -0.5 }, { dc: 0.5, dr: 1.6 }, { dc: -1.6, dr: 0.5 }, { dc: -0.5, dr: -1.6 }
   ];
+  const hashId = (s: string): number => {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  };
+  const patrolFor = (twinId: string, beat: number) => WORK_PATROL[(beat + hashId(twinId)) % WORK_PATROL.length];
 
   for (let beat = 0; beat < DAILY_ENERGY; beat++) {
     // Plan every twin's beat in parallel (independent Claude calls).
@@ -119,10 +126,10 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
       } else if (verb === "socialize" && tgt) {
         const other = work.find((o) => o.twin.id !== w.twin.id && o.twin.name === tgt);
         const op = other ? positions[other.twin.id] : null;
-        const off = WORK_PATROL[beat % WORK_PATROL.length];
+        const off = patrolFor(w.twin.id, beat);
         positions[w.twin.id] = op ? { col: op.col - 1, row: op.row } : { col: z.col + off.dc, row: z.row + off.dr };
       } else {
-        const off = WORK_PATROL[beat % WORK_PATROL.length];
+        const off = patrolFor(w.twin.id, beat);
         positions[w.twin.id] = { col: z.col + off.dc, row: z.row + off.dr };
       }
     }
