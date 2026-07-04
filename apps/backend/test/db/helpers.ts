@@ -67,6 +67,13 @@ const CREATE_SQL = `
     resolved_at timestamptz,
     consumed_at timestamptz
   );
+  create table relationships (
+    id uuid primary key default gen_random_uuid(),
+    from_twin_id uuid not null references twins(id),
+    to_twin_id uuid not null references twins(id),
+    score integer not null default 0,
+    updated_at timestamptz not null default now()
+  );
 `;
 
 export interface TestDb { db: DB; stop: () => Promise<void>; }

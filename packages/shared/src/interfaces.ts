@@ -1,4 +1,5 @@
 import type { Twin, Wallet, Project, Memory, Structure, Approval } from "./types.js";
+import type { Relationship } from "./social.js";
 
 /** Persistence boundary for twins. Implemented by the data layer (Drizzle). */
 export interface TwinRepository {
@@ -34,6 +35,17 @@ export interface ProjectRepository {
 export interface MemoryRepository {
   append(memory: Memory): Promise<void>;
   recent(twinId: string, limit: number): Promise<Memory[]>;
+}
+
+/** Persistence boundary for directed twin->twin relationships. */
+export interface RelationshipRepository {
+  get(fromTwinId: string, toTwinId: string): Promise<Relationship | null>;
+  /** Apply a delta (creating the row at 0 first if missing); clamp score to [-100,100]; returns updated. */
+  applyDelta(fromTwinId: string, toTwinId: string, delta: number): Promise<Relationship>;
+  /** All relationships FROM this twin. */
+  listFrom(twinId: string): Promise<Relationship[]>;
+  /** Every relationship row (for popularity scoring). */
+  listAll(): Promise<Relationship[]>;
 }
 
 /** Persistence boundary for owner approvals. */

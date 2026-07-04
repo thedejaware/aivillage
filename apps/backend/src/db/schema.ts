@@ -60,6 +60,14 @@ export const memories = pgTable("memories", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const relationships = pgTable("relationships", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fromTwinId: uuid("from_twin_id").notNull().references(() => twins.id),
+  toTwinId: uuid("to_twin_id").notNull().references(() => twins.id),
+  score: integer("score").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id),
