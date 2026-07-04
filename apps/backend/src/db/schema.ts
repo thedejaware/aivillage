@@ -47,6 +47,7 @@ export const structures = pgTable("structures", {
   projectId: uuid("project_id"),
   type: text("type").notNull(),
   zone: text("zone").notNull(),
+  builtByTwinId: uuid("built_by_twin_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 

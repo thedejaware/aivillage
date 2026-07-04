@@ -79,13 +79,19 @@ interface Scene {
   zones: WorldZone[];
   sprays: Graphics[];
   motes: { g: Graphics; x: number; y: number; v: number; a: number }[];
+  myId: { readonly current: string | null };
   tick: number;
 }
 
-export default function WorldCanvas({ state }: { state: WorldState }) {
+export default function WorldCanvas({ state, myTwinId }: { state: WorldState; myTwinId?: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const pending = useRef<WorldState>(state);
+  const myIdRef = useRef<string | null>(myTwinId ?? null);
+
+  useEffect(() => {
+    myIdRef.current = myTwinId ?? null;
+  }, [myTwinId]);
 
   const zoom = (factor: number) => {
     const sc = sceneRef.current;
@@ -145,7 +151,7 @@ export default function WorldCanvas({ state }: { state: WorldState }) {
       const scene: Scene = {
         app, world, entities, twins: new Map(), structures: new Set(),
         occupied: new Set(), overflow: new Map(), zones: pending.current.zones,
-        sprays: [], motes: [], tick: 0
+        sprays: [], motes: [], myId: myIdRef, tick: 0
       };
       sceneRef.current = scene;
 
@@ -514,7 +520,15 @@ function addStructure(st: WorldStructureView, sc: Scene): void {
     return;
   }
   sc.occupied.add(key);
-  drawStructure(sc, st.type, isoX(st.col, st.row), isoY(st.col, st.row) + TILE_H / 2);
+  const c = drawStructure(sc, st.type, isoX(st.col, st.row), isoY(st.col, st.row) + TILE_H / 2);
+  // Mark buildings made by YOUR twin so you can spot them instantly.
+  if (st.builtByTwinId && st.builtByTwinId === sc.myId.current) {
+    const star = new Text({ text: "★ yours", style: new TextStyle({ fill: 0xffd166, fontSize: 9, fontFamily: "monospace" }) });
+    star.anchor.set(0.5, 1);
+    star.x = isoX(st.col, st.row);
+    star.y = isoY(st.col, st.row) + TILE_H / 2 - 38;
+    c.addChild(star);
+  }
 }
 
 function reconcile(sc: Scene, s: WorldState): void {

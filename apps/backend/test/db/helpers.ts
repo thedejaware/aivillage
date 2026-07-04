@@ -45,6 +45,7 @@ const CREATE_SQL = `
     project_id uuid,
     type text not null,
     zone text not null,
+    built_by_twin_id uuid,
     created_at timestamptz not null default now()
   );
   create table memories (

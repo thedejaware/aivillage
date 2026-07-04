@@ -31,6 +31,13 @@ export interface DayResult {
   structuresBuilt: number;
 }
 
+export interface RunDayOptions {
+  /** Run only this twin (a "catch-up" — e.g. right after its owner approves). */
+  onlyTwinId?: string;
+  /** Beats to run (defaults to the full daily energy). */
+  beats?: number;
+}
+
 interface WorkingTwin {
   twin: Twin;
   project: Project | null;
@@ -44,7 +51,7 @@ interface WorkingTwin {
  * a beat run in parallel), snapshotting the world after each beat, and persisting
  * the final state. Returns the per-beat frames for client-side playback.
  */
-export async function runDay(llm: LlmClient): Promise<DayResult> {
+export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<DayResult> {
   const db = getDb();
   const twinRepo = new DrizzleTwinRepository(db);
   const structRepo = new DrizzleStructureRepository(db);
@@ -52,8 +59,13 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
   const approvalRepo = new DrizzleApprovalRepository(db);
 
   const loaded = await twinRepo.listAll();
-  const work: WorkingTwin[] = loaded.map((t) => ({
-    twin: { ...t, energy: DAILY_ENERGY, energyUpdatedAt: new Date().toISOString() },
+  const beats = Math.min(opts.beats ?? DAILY_ENERGY, DAILY_ENERGY);
+  const actors = opts.onlyTwinId ? loaded.filter((t) => t.id === opts.onlyTwinId) : loaded;
+  const bystanders = opts.onlyTwinId ? loaded.filter((t) => t.id !== opts.onlyTwinId) : [];
+  const allNames = loaded.map((t) => t.name);
+
+  const work: WorkingTwin[] = actors.map((t) => ({
+    twin: { ...t, energy: beats, energyUpdatedAt: new Date().toISOString() },
     project: null,
     recent: [],
     pending: null,
@@ -69,9 +81,14 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
 
   const zoneByName = new Map(DEFAULT_ZONES.map((z) => [z.name, z] as const));
   const positions: Record<string, { col: number; row: number }> = {};
-  for (const w of work) {
-    const z = zoneByName.get(w.twin.locationZone) ?? DEFAULT_ZONES[0];
-    positions[w.twin.id] = { col: z.col, row: z.row };
+  for (const t of loaded) {
+    const z = zoneByName.get(t.locationZone) ?? DEFAULT_ZONES[0];
+    positions[t.id] = { col: z.col, row: z.row };
+  }
+  // Bystanders keep their last narration as their speech bubble during a catch-up run.
+  for (const t of bystanders) {
+    const recent = await memRepo.recent(t.id, 1);
+    if (recent.length > 0) says[t.id] = recent[0].content;
   }
   // Where a twin walks while doing a "work" beat — a little patrol around its zone.
   // Indexed per-twin (hash offset) so twins move in DIFFERENT directions each beat.
@@ -85,7 +102,7 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
   };
   const patrolFor = (twinId: string, beat: number) => WORK_PATROL[(beat + hashId(twinId)) % WORK_PATROL.length];
 
-  for (let beat = 0; beat < DAILY_ENERGY; beat++) {
+  for (let beat = 0; beat < beats; beat++) {
     // Plan every twin's beat in parallel (independent Claude calls).
     await Promise.all(
       work.map(async (w) => {
@@ -95,7 +112,7 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
         w.twin = spent.twin;
         w.acted = true;
         const ctx = {
-          nearbyTwinNames: work.filter((o) => o.twin.id !== w.twin.id).map((o) => o.twin.name).slice(0, 3),
+          nearbyTwinNames: allNames.filter((n) => n !== w.twin.name).slice(0, 3),
           recentMemories: [...w.recent].slice(-3).reverse(),
           activeProject: w.project
             ? { type: w.project.type, stepsDone: w.project.stepsDone, stepsTotal: w.project.stepsTotal }
@@ -171,7 +188,7 @@ export async function runDay(llm: LlmClient): Promise<DayResult> {
 
     frames.push(toWorldState({
       zones: DEFAULT_ZONES,
-      twins: work.map((w) => w.twin),
+      twins: [...work.map((w) => w.twin), ...bystanders],
       structures: allStructures,
       saysByTwinId: says,
       positionsByTwinId: { ...positions }

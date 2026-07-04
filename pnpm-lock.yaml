@@ -28,6 +28,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      node-cron:
+        specifier: ^4.5.0
+        version: 4.5.0
       postgres:
         specifier: ^3.4.4
         version: 3.4.9
@@ -1779,6 +1782,10 @@ packages:
         optional: true
       sass:
         optional: true
+
+  node-cron@4.5.0:
+    resolution: {integrity: sha512-4Trh+kjvbXokyJkwQumvD5YAgeJfgHLR/sKyu71uSmxfCR5QMO1hldpvmFZOICN5pLgNY+J5Y8+ar3XKo5/4tQ==}
+    engines: {node: '>=20'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -3652,6 +3659,8 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  node-cron@4.5.0: {}
 
   normalize-path@3.0.0: {}
 

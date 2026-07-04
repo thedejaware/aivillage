@@ -2,6 +2,7 @@ import "dotenv/config";
 import http from "node:http";
 import express from "express";
 import cors from "cors";
+import cron from "node-cron";
 import { Server as IOServer } from "socket.io";
 import { seedIfEmpty } from "../sim/seed.js";
 import { runDay } from "../sim/runDay.js";
@@ -55,7 +56,9 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
-// Resolve an approval: {approve: true|false}
+// Resolve an approval: {approve: true|false}. Approving immediately sends the
+// twin off on a short catch-up run (only that twin moves) so the owner SEES
+// their decision take effect.
 app.post("/api/approvals/:id/resolve", async (req, res) => {
   try {
     const updated = await new DrizzleApprovalRepository(getDb()).resolve(req.params.id, Boolean(req.body?.approve));
@@ -64,6 +67,16 @@ app.post("/api/approvals/:id/resolve", async (req, res) => {
       return;
     }
     res.json(updated);
+    if (updated.status === "approved") {
+      void (async () => {
+        try {
+          const { frames } = await runDay(chooseLlm(), { onlyTwinId: updated.twinId, beats: 3 });
+          io.emit("day", { frames });
+        } catch (e) {
+          console.error("catch-up run failed:", e);
+        }
+      })();
+    }
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -81,6 +94,17 @@ app.post("/api/run-day", async (_req, res) => {
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
+
+// The village lives once a day on its own (override cadence with RUN_DAY_CRON).
+cron.schedule(process.env.RUN_DAY_CRON ?? "0 9 * * *", async () => {
+  try {
+    const { frames, structuresBuilt } = await runDay(chooseLlm());
+    io.emit("day", { frames });
+    console.log(`scheduled day complete — ${structuresBuilt} structures built`);
+  } catch (e) {
+    console.error("scheduled day failed:", e);
+  }
+});
 
 seedIfEmpty()
   .then((n) => {

@@ -22,6 +22,7 @@ export default function Page() {
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [myTwinId, setMyTwinId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [form, setForm] = useState({ name: "", personality: "", goal: "" });
   const [creating, setCreating] = useState(false);
@@ -40,6 +41,7 @@ export default function Page() {
 
   useEffect(() => {
     setUserId(localStorage.getItem("aiv.userId"));
+    setMyTwinId(localStorage.getItem("aiv.twinId"));
   }, []);
 
   useEffect(() => {
@@ -86,6 +88,7 @@ export default function Page() {
         localStorage.setItem("aiv.userId", data.userId);
         localStorage.setItem("aiv.twinId", data.twinId ?? "");
         setUserId(data.userId);
+        setMyTwinId(data.twinId ?? null);
       }
     } finally {
       setCreating(false);
@@ -108,7 +111,7 @@ export default function Page() {
       </div>
 
       {state ? (
-        <WorldCanvas state={state} />
+        <WorldCanvas state={state} myTwinId={myTwinId} />
       ) : (
         <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#7f93c4", ...mono }}>
           Connecting to the village…

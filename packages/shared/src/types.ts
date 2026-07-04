@@ -57,6 +57,8 @@ export interface Structure {
   projectId: string;
   type: ProjectType;
   zone: string;
+  /** twin that completed the project (null/absent for legacy rows) */
+  builtByTwinId?: string | null;
 }
 
 export type Verb = "work" | "socialize" | "move";

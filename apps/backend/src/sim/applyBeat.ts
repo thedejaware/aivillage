@@ -38,7 +38,7 @@ export function applyBeat(
     }
     project = advance(project);
     if (isComplete(project)) {
-      structure = { id: deps.newStructureId(), projectId: project.id, type: project.type, zone: project.zone };
+      structure = { id: deps.newStructureId(), projectId: project.id, type: project.type, zone: project.zone, builtByTwinId: twin.id };
       nextTwin = applyReward(nextTwin, rewardFor(project.type));
       project = null;
     }

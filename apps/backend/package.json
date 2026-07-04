@@ -16,6 +16,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.33.0",
     "express": "^5.2.1",
+    "node-cron": "^4.5.0",
     "postgres": "^3.4.4",
     "socket.io": "^4.8.3"
   },
