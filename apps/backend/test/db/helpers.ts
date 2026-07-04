@@ -55,6 +55,17 @@ const CREATE_SQL = `
     importance integer not null default 0,
     created_at timestamptz not null default now()
   );
+  create table approvals (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id),
+    twin_id uuid not null references twins(id),
+    kind text not null,
+    payload jsonb not null,
+    status text not null default 'pending',
+    created_at timestamptz not null default now(),
+    resolved_at timestamptz,
+    consumed_at timestamptz
+  );
 `;
 
 export interface TestDb { db: DB; stop: () => Promise<void>; }

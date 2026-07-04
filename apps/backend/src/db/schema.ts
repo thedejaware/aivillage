@@ -58,3 +58,15 @@ export const memories = pgTable("memories", {
   importance: integer("importance").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
+
+export const approvals = pgTable("approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  twinId: uuid("twin_id").notNull().references(() => twins.id),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").$type<{ projectType: string; zone: string }>().notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  consumedAt: timestamp("consumed_at", { withTimezone: true })
+});
