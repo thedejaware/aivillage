@@ -73,7 +73,7 @@ export const approvals = pgTable("approvals", {
   userId: uuid("user_id").notNull().references(() => users.id),
   twinId: uuid("twin_id").notNull().references(() => twins.id),
   kind: text("kind").notNull(),
-  payload: jsonb("payload").$type<{ projectType: string; zone: string }>().notNull(),
+  payload: jsonb("payload").$type<{ projectType: string; zone: string } | { move: string; targetName: string }>().notNull(),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),

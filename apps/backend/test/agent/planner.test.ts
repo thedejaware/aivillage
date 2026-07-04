@@ -19,21 +19,40 @@ describe("buildPrompt", () => {
     expect(p).toContain("Lena");
   });
 
-  it("nudges toward work and shows active project progress", () => {
+  it("includes relationships and offers the social verbs", () => {
     const p = buildPrompt(twin(), {
-      nearbyTwinNames: [],
+      nearbyTwinNames: ["Lena"],
       recentMemories: [],
-      activeProject: { type: "workshop", stepsDone: 2, stepsTotal: 3 }
+      relationships: [{ name: "Lena", label: "rival" }]
     });
-    expect(p).toContain("2/3");
-    expect(p.toLowerCase()).toContain('prefer "work"');
+    expect(p).toContain("Lena: rival");
+    expect(p).toContain('"chat"');
+    expect(p).toContain('"bigmove"');
+    expect(p).toContain("confront");
+  });
+});
+
+describe("parseBeat (social verbs)", () => {
+  it("parses a chat beat", () => {
+    const r = parseBeat('{"verb":"chat","target":"Lena","kind":null,"narrative":"Says hi."}');
+    expect(r).toMatchObject({ verb: "chat", target: "Lena", kind: null });
+  });
+  it("parses a bigmove with a valid kind", () => {
+    const r = parseBeat('{"verb":"bigmove","target":"Lena","kind":"confront","narrative":"Enough."}');
+    expect(r).toMatchObject({ verb: "bigmove", target: "Lena", kind: "confront" });
+  });
+  it("throws on a bigmove with a bad kind", () => {
+    expect(() => parseBeat('{"verb":"bigmove","target":"Lena","kind":"explode","narrative":"x"}')).toThrow();
+  });
+  it("throws on a bigmove with no kind", () => {
+    expect(() => parseBeat('{"verb":"bigmove","target":"Lena","narrative":"x"}')).toThrow();
   });
 });
 
 describe("parseBeat", () => {
   it("parses a clean JSON object", () => {
     const r = parseBeat('{"verb":"work","target":"plaza","narrative":"Working on the fountain."}');
-    expect(r).toEqual({ verb: "work", target: "plaza", narrative: "Working on the fountain." });
+    expect(r).toEqual({ verb: "work", target: "plaza", kind: null, narrative: "Working on the fountain." });
   });
   it("tolerates surrounding prose around the JSON", () => {
     const r = parseBeat('Sure!\n{"verb":"move","target":"event_space","narrative":"Heading over."}\nDone.');
@@ -51,6 +70,6 @@ describe("planBeat", () => {
   it("calls the llm and returns a parsed BeatResult", async () => {
     const r = await planBeat(twin(), { nearbyTwinNames: [], recentMemories: [] },
       fakeLlm('{"verb":"socialize","target":"Lena","narrative":"Say hi."}'));
-    expect(r).toEqual({ verb: "socialize", target: "Lena", narrative: "Say hi." });
+    expect(r).toEqual({ verb: "socialize", target: "Lena", kind: null, narrative: "Say hi." });
   });
 });

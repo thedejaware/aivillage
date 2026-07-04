@@ -61,11 +61,16 @@ export interface Structure {
   builtByTwinId?: string | null;
 }
 
-export type Verb = "work" | "socialize" | "move";
+export type Verb = "work" | "socialize" | "move" | "chat" | "bond" | "scheme" | "bigmove";
+
+/** Big social moves that require the owner's approval. */
+export type SocialMove = "confront" | "confess" | "party" | "reconcile";
 
 export interface BeatResult {
   verb: Verb;
   target: string | null; // a zone name, a twin name, or null
+  /** only for verb "bigmove" */
+  kind?: SocialMove | null;
   narrative: string;
 }
 
@@ -81,12 +86,16 @@ export interface Memory {
 // --- Approvals (owner-in-the-loop) ---
 export type ApprovalStatus = "pending" | "approved" | "declined";
 
+export type ApprovalPayload =
+  | { projectType: ProjectType; zone: string } // legacy: start_project
+  | { move: SocialMove; targetName: string }; // social_move (v2)
+
 export interface Approval {
   id: string;
   userId: string;
   twinId: string;
-  kind: string; // e.g. "start_project"
-  payload: { projectType: ProjectType; zone: string };
+  kind: string; // "start_project" | "social_move"
+  payload: ApprovalPayload;
   status: ApprovalStatus;
   createdAt: string; // ISO
   resolvedAt: string | null;

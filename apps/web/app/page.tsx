@@ -13,7 +13,36 @@ interface Panel {
   twin: Twin | null;
   memories: Memory[];
   approvals: Approval[];
+  relationships?: { name: string; label: string; score: number }[];
+  leaderboard?: { twinId: string; name: string; popularity: number }[];
 }
+
+function approvalText(a: Approval): React.ReactNode {
+  if ("projectType" in a.payload) {
+    return (
+      <>
+        Your twin wants to build a <b style={{ color: "#9fd9ff" }}>{a.payload.projectType.replace(/_/g, " ")}</b> at{" "}
+        {a.payload.zone.replace(/_/g, " ")}.
+      </>
+    );
+  }
+  const t = <b style={{ color: "#9fd9ff" }}>{a.payload.targetName}</b>;
+  switch (a.payload.move) {
+    case "confront":
+      return <>Your twin wants to publicly <b style={{ color: "#ff8a9c" }}>confront</b> {t}. Let it happen?</>;
+    case "confess":
+      return <>Your twin wants to tell {t} they are its <b style={{ color: "#7fe0a8" }}>best friend</b>. Allow it?</>;
+    case "party":
+      return <>Your twin wants to throw a <b style={{ color: "#ffd166" }}>party</b> in {t}&apos;s honour. Fund the fun?</>;
+    case "reconcile":
+      return <>Your twin wants to <b style={{ color: "#7fe0a8" }}>make peace</b> with {t}. Bury the hatchet?</>;
+    default:
+      return <>Your twin is planning something involving {t}.</>;
+  }
+}
+
+const labelColor = (label: string) =>
+  label === "nemesis" || label === "rival" ? "#ff8a9c" : label === "acquaintance" ? "#8fa8d8" : "#7fe0a8";
 
 const mono: React.CSSProperties = { fontFamily: "monospace" };
 
@@ -131,7 +160,7 @@ export default function Page() {
           <>
             <div style={{ color: "#eaf0ff", fontSize: 14, marginBottom: 4 }}>Create your twin</div>
             <div style={{ color: "#7f93c4", marginBottom: 10 }}>
-              It will live in the village, work toward your goal, and ask you before big decisions.
+              It will live among the others — making friends, rivals and drama — and ask you before its big moves.
             </div>
             <input
               placeholder="Name (e.g. Memo)"
@@ -140,13 +169,13 @@ export default function Page() {
               style={inputStyle}
             />
             <input
-              placeholder="Personality (e.g. curious builder)"
+              placeholder="Personality (e.g. charming gossip)"
               value={form.personality}
               onChange={(e) => setForm({ ...form, personality: e.target.value })}
               style={inputStyle}
             />
             <input
-              placeholder="Goal (e.g. build a grand arcade)"
+              placeholder="Goal (e.g. become the most loved in the village)"
               value={form.goal}
               onChange={(e) => setForm({ ...form, goal: e.target.value })}
               style={inputStyle}
@@ -178,10 +207,7 @@ export default function Page() {
                 <div style={{ color: "#ffd166", marginBottom: 6 }}>Needs your decision</div>
                 {panel.approvals.map((a) => (
                   <div key={a.id} style={{ background: "#101a30", border: "1px solid #3a5a9a", borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                    <div style={{ marginBottom: 8 }}>
-                      Your twin wants to build a <b style={{ color: "#9fd9ff" }}>{a.payload.projectType.replace(/_/g, " ")}</b> at{" "}
-                      {a.payload.zone.replace(/_/g, " ")}.
-                    </div>
+                    <div style={{ marginBottom: 8 }}>{approvalText(a)}</div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={() => resolveApproval(a.id, true)} style={{ ...btnStyle, background: "#143c26", borderColor: "#2e7d4f", color: "#7fe0a8" }}>
                         ✓ Approve
@@ -192,6 +218,34 @@ export default function Page() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {panel && (panel.leaderboard?.length ?? 0) > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ color: "#7f93c4", marginBottom: 6 }}>🏆 Village standings</div>
+                {panel.leaderboard!.map((row, i) => {
+                  const mine = row.twinId === myTwinId;
+                  return (
+                    <div key={row.twinId} style={{ display: "flex", justifyContent: "space-between", padding: "2px 6px", borderRadius: 4, background: mine ? "#16314f" : "transparent", color: mine ? "#9fd9ff" : "#a9bce0" }}>
+                      <span>{i + 1}. {row.name}{mine ? " ← you" : ""}</span>
+                      <span style={{ color: row.popularity < 0 ? "#ff8a9c" : "#7fe0a8" }}>{row.popularity}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {panel && (panel.relationships?.length ?? 0) > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ color: "#7f93c4", marginBottom: 6 }}>Friends &amp; rivals</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {panel.relationships!.map((r) => (
+                    <span key={r.name} style={{ border: `1px solid ${labelColor(r.label)}`, color: labelColor(r.label), borderRadius: 12, padding: "2px 8px", fontSize: 11 }}>
+                      {r.name} · {r.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 

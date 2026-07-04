@@ -4,10 +4,10 @@ import { getDb } from "../db/appDb.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 
 const NPCS = [
-  { name: "Mehmet", zone: "plaza", traits: ["chaotic inventor"], goals: ["build a grand fountain in the plaza"] },
-  { name: "Aiko", zone: "maker_space", traits: ["meticulous tinkerer"], goals: ["open a workshop for gadgets"] },
-  { name: "Daniel", zone: "event_space", traits: ["showman"], goals: ["host a great keynote"] },
-  { name: "Ravi", zone: "network_hub", traits: ["patient gardener"], goals: ["grow a community garden"] }
+  { name: "Mehmet", zone: "plaza", traits: ["chaotic inventor", "can't keep a secret"], goals: ["be admired by everyone in the village"] },
+  { name: "Aiko", zone: "maker_space", traits: ["meticulous perfectionist", "quietly competitive"], goals: ["prove she is the smartest in the village"] },
+  { name: "Daniel", zone: "event_space", traits: ["flamboyant showman", "hates being ignored"], goals: ["be the centre of every conversation"] },
+  { name: "Ravi", zone: "network_hub", traits: ["gentle peacemaker", "secretly ambitious"], goals: ["become the village's most trusted friend"] }
 ];
 
 /** Seed the world with NPC twins if it's empty. Returns the twin count. */
