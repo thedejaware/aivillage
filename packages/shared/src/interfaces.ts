@@ -1,4 +1,4 @@
-import type { Twin, Wallet, Project, Memory, Structure } from "./types.js";
+import type { Twin, Wallet, Project, Memory, Structure, Approval } from "./types.js";
 
 /** Persistence boundary for twins. Implemented by the data layer (Drizzle). */
 export interface TwinRepository {
@@ -34,4 +34,16 @@ export interface ProjectRepository {
 export interface MemoryRepository {
   append(memory: Memory): Promise<void>;
   recent(twinId: string, limit: number): Promise<Memory[]>;
+}
+
+/** Persistence boundary for owner approvals. */
+export interface ApprovalRepository {
+  create(a: { userId: string; twinId: string; kind: string; payload: Approval["payload"] }): Promise<Approval>;
+  listPendingByUser(userId: string): Promise<Approval[]>;
+  /** Set status approved/declined + resolvedAt. Returns updated row or null if missing/already resolved. */
+  resolve(id: string, approved: boolean): Promise<Approval | null>;
+  /** Newest APPROVED and not-yet-consumed approval for a twin, or null. */
+  nextActionableForTwin(twinId: string): Promise<Approval | null>;
+  hasPendingForTwin(twinId: string): Promise<boolean>;
+  markConsumed(id: string): Promise<void>;
 }

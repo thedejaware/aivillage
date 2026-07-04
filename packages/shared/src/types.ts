@@ -75,3 +75,18 @@ export interface Memory {
   importance: number;
   createdAt: string; // ISO timestamp
 }
+
+// --- Approvals (owner-in-the-loop) ---
+export type ApprovalStatus = "pending" | "approved" | "declined";
+
+export interface Approval {
+  id: string;
+  userId: string;
+  twinId: string;
+  kind: string; // e.g. "start_project"
+  payload: { projectType: ProjectType; zone: string };
+  status: ApprovalStatus;
+  createdAt: string; // ISO
+  resolvedAt: string | null;
+  consumedAt: string | null;
+}
