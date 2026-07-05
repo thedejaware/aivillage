@@ -5,6 +5,7 @@ import {
   type BeatResult, type SocialMove
 } from "@aivillage/shared";
 import { getDb } from "../db/appDb.js";
+import type { DB } from "../db/client.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleStructureRepository } from "../db/structureRepository.js";
 import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
@@ -25,6 +26,8 @@ export interface RunDayOptions {
   onlyTwinId?: string;
   /** Beats to run (defaults to the full daily energy). */
   beats?: number;
+  /** Optional DB override — used by integration tests to inject a testcontainer DB. */
+  db?: DB;
 }
 
 interface WorkingTwin {
@@ -49,6 +52,14 @@ const MOVE_NARRATIVE: Record<SocialMove, (a: string, b: string) => string> = {
   reconcile: (a, b) => `${a} walks up to ${b}, takes a breath, and offers to bury the hatchet.`
 };
 
+/** Deterministic spread offsets so multiple pairs at the same venue don't stack. */
+const SCENE_SPREAD = [
+  { dc: 0, dr: 0 },
+  { dc: 1.4, dr: 1.2 },
+  { dc: -1.3, dr: 1.3 },
+  { dc: 1.2, dr: -1.2 }
+];
+
 /**
  * Run one simulated day of village drama: every twin chats, bonds, schemes and
  * occasionally proposes a big social move (owner-gated). Relationships shift,
@@ -56,7 +67,7 @@ const MOVE_NARRATIVE: Record<SocialMove, (a: string, b: string) => string> = {
  * client playback.
  */
 export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<DayResult> {
-  const db = getDb();
+  const db = opts.db ?? getDb();
   const twinRepo = new DrizzleTwinRepository(db);
   const structRepo = new DrizzleStructureRepository(db);
   const memRepo = new DrizzleMemoryRepository(db);
@@ -168,9 +179,49 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
       })
     );
 
+    // Per-beat, per-venue scene counter for deterministic spread offsets.
+    const venueSceneCount: Record<string, number> = {};
+    const nextSceneOffset = (venueZone: string): { dc: number; dr: number } => {
+      const idx = venueSceneCount[venueZone] ?? 0;
+      venueSceneCount[venueZone] = idx + 1;
+      return SCENE_SPREAD[idx % SCENE_SPREAD.length];
+    };
+
+    // Track twins already placed in a social scene this beat — their solo-action
+    // position update is skipped so a target doesn't overwrite the scene placement.
+    const placedThisBeat = new Set<string>();
+
+    // Helper: place both participants of a scene at a specific venue.
+    const placeAtVenue = (
+      actorId: string,
+      targetId: string,
+      venueZone: string,
+      actorOffset: { dc: number; dr: number },
+      targetOffset: { dc: number; dr: number }
+    ) => {
+      const vz = zoneByName.get(venueZone)!;
+      const spread = nextSceneOffset(venueZone);
+      positions[actorId] = { col: vz.col + actorOffset.dc + spread.dc, row: vz.row + actorOffset.dr + spread.dr };
+      positions[targetId] = { col: vz.col + targetOffset.dc + spread.dc, row: vz.row + targetOffset.dr + spread.dr };
+      placedThisBeat.add(actorId);
+      placedThisBeat.add(targetId);
+    };
+
+    // Helper: update locationZone for actor (WorkingTwin) and optionally the target.
+    const updateZones = (actorW: WorkingTwin, targetTwin: Twin | undefined, zone: string) => {
+      actorW.twin = { ...actorW.twin, locationZone: zone };
+      if (targetTwin) {
+        const targetW = work.find((ww) => ww.twin.id === targetTwin.id);
+        if (targetW) targetW.twin = { ...targetW.twin, locationZone: zone };
+      }
+    };
+
     // Apply outcomes sequentially.
     for (const w of work) {
       if (!w.acted || !w.pending) continue;
+      // If this twin was already placed in a social scene by an earlier actor this
+      // beat, skip its solo-positioning so the scene placement is not overwritten.
+      if (placedThisBeat.has(w.twin.id)) continue;
       let beatResult = w.pending;
 
       // Legacy-verb safety: the model shouldn't emit these anymore, but coerce if it does.
@@ -185,8 +236,9 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           if (target) {
             await approvalRepo.markConsumed(actionable.id);
             await executeMove(w.twin, actionable.payload.move, target);
-            const tp = positions[target.id];
-            positions[w.twin.id] = { col: tp.col - 1, row: tp.row };
+            // Plaza (THE STAGE): actor at {dc:-1, dr:0}, target at {dc:+0.8, dr:0}.
+            placeAtVenue(w.twin.id, target.id, "plaza", { dc: -1, dr: 0 }, { dc: 0.8, dr: 0 });
+            updateZones(w, target, "plaza");
             w.recent.push(remember(w.twin.id, "note", "carried out the approved plan"));
             continue;
           }
@@ -194,7 +246,6 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
       }
 
       const targetTwin = beatResult.target ? twinByName.get(beatResult.target) : undefined;
-      const z = zoneByName.get(w.twin.locationZone) ?? DEFAULT_ZONES[0];
 
       if (beatResult.verb === "chat" && targetTwin && targetTwin.id !== w.twin.id) {
         try {
@@ -206,9 +257,9 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           const crossB = await shift(targetTwin.id, w.twin.id, convo.deltaBtoA);
           const myLine = convo.lines.filter((l) => l.speaker === w.twin.name).pop();
           const theirLine = convo.lines.filter((l) => l.speaker === targetTwin.name).pop();
-          if (myLine) says[w.twin.id] = `“${myLine.text}”`;
-          if (theirLine) says[targetTwin.id] = `“${theirLine.text}”`;
-          const summary = convo.moment ?? `${w.twin.name} and ${targetTwin.name} talked: “${(myLine ?? convo.lines[0]).text}”`;
+          if (myLine) says[w.twin.id] = `"${myLine.text}"`;
+          if (theirLine) says[targetTwin.id] = `"${theirLine.text}"`;
+          const summary = convo.moment ?? `${w.twin.name} and ${targetTwin.name} talked: "${(myLine ?? convo.lines[0]).text}"`;
           w.recent.push(remember(w.twin.id, "chat", summary, convo.moment ? 2 : 1));
           remember(targetTwin.id, "chat", summary, convo.moment ? 2 : 1);
           for (const cross of [crossA ? `${w.twin.name} now sees ${targetTwin.name} as a ${crossA}.` : null, crossB ? `${targetTwin.name} now sees ${w.twin.name} as a ${crossB}.` : null]) {
@@ -217,8 +268,9 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
               remember(targetTwin.id, "moment", cross, 2);
             }
           }
-          const tp = positions[targetTwin.id];
-          positions[w.twin.id] = { col: tp.col - 1, row: tp.row };
+          // Café (maker_space): actor at {dc:-0.8, dr:+0.3}, target at {dc:+0.6, dr:-0.3}.
+          placeAtVenue(w.twin.id, targetTwin.id, "maker_space", { dc: -0.8, dr: 0.3 }, { dc: 0.6, dr: -0.3 });
+          updateZones(w, targetTwin, "maker_space");
         } catch {
           w.recent.push(remember(w.twin.id, "chat", beatResult.narrative));
           says[w.twin.id] = beatResult.narrative;
@@ -237,14 +289,16 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           remember(w.twin.id, "moment", momentText, 2);
           remember(targetTwin.id, "moment", momentText, 2);
         }
-        const tp = positions[targetTwin.id];
-        positions[w.twin.id] = { col: tp.col - 1, row: tp.row };
+        // Lawn (event_space): actor at {dc:-0.8, dr:+0.3}, target at {dc:+0.6, dr:-0.3}.
+        placeAtVenue(w.twin.id, targetTwin.id, "event_space", { dc: -0.8, dr: 0.3 }, { dc: 0.6, dr: -0.3 });
+        updateZones(w, targetTwin, "event_space");
       } else if (beatResult.verb === "bigmove" && targetTwin && beatResult.kind) {
         if (!w.twin.ownerUserId) {
           // NPCs act on impulse — no owner to ask.
           await executeMove(w.twin, beatResult.kind, targetTwin);
-          const tp = positions[targetTwin.id];
-          positions[w.twin.id] = { col: tp.col - 1, row: tp.row };
+          // Plaza (THE STAGE): actor at {dc:-1, dr:0}, target at {dc:+0.8, dr:0}.
+          placeAtVenue(w.twin.id, targetTwin.id, "plaza", { dc: -1, dr: 0 }, { dc: 0.8, dr: 0 });
+          updateZones(w, targetTwin, "plaza");
         } else if (await approvalRepo.hasPendingForTwin(w.twin.id)) {
           const line = `${w.twin.name} is bursting to act but waits for your decision.`;
           w.recent.push(remember(w.twin.id, "note", line));
@@ -267,9 +321,11 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
         w.recent.push(remember(w.twin.id, "move", beatResult.narrative));
         says[w.twin.id] = beatResult.narrative;
       } else {
-        // scheme (or an unresolvable target): a solo social action.
+        // scheme (or an unresolvable target): solo action at network_hub (quiet corner).
+        const nhz = zoneByName.get("network_hub") ?? DEFAULT_ZONES[0];
         const off = patrolFor(w.twin.id, beat);
-        positions[w.twin.id] = { col: z.col + off.dc, row: z.row + off.dr };
+        positions[w.twin.id] = { col: nhz.col + off.dc, row: nhz.row + off.dr };
+        w.twin = { ...w.twin, locationZone: "network_hub" };
         w.recent.push(remember(w.twin.id, "scheme", beatResult.narrative));
         says[w.twin.id] = beatResult.narrative;
       }

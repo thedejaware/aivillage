@@ -7,7 +7,19 @@ import type { WorldState, Twin, Memory, Approval } from "@aivillage/shared";
 
 const WorldCanvas = dynamic(() => import("../components/WorldCanvas"), { ssr: false });
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const FRAME_MS = 1100;
+const QUIET_FRAME_MS = 1100;
+
+/** One line on the TV caption bar (reality-show subtitles). */
+interface Caption {
+  twinId: string;
+  name: string;
+  color: string;
+  text: string;
+}
+
+const hexColor = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
+/** Reading time scaled to line length: 2s floor, 7s ceiling. */
+const captionDur = (text: string) => Math.min(7000, Math.max(2000, 1200 + text.length * 45));
 
 interface Panel {
   twin: Twin | null;
@@ -55,7 +67,11 @@ export default function Page() {
   const [panel, setPanel] = useState<Panel | null>(null);
   const [form, setForm] = useState({ name: "", personality: "", goal: "" });
   const [creating, setCreating] = useState(false);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [caption, setCaption] = useState<Caption | null>(null);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const playGen = useRef(0);
+  const stateRef = useRef<WorldState | null>(null);
+  stateRef.current = state;
 
   const refreshPanel = useCallback(async () => {
     const uid = localStorage.getItem("aiv.userId");
@@ -77,22 +93,54 @@ export default function Page() {
     if (userId) refreshPanel();
   }, [userId, refreshPanel]);
 
+  /**
+   * Episode playback: frames advance the world; every NEW spoken line plays
+   * one at a time on the TV caption bar while its speaker shows a 💬 marker.
+   */
+  const playEpisode = useCallback(
+    async (frames: WorldState[]) => {
+      const gen = ++playGen.current;
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const prevSay: Record<string, string | null> = {};
+      for (const t of stateRef.current?.twins ?? []) prevSay[t.id] = t.say;
+
+      for (const f of frames) {
+        if (playGen.current !== gen) return;
+        setState(f);
+        const fresh = f.twins.filter((t) => t.say && t.say !== prevSay[t.id]);
+        for (const t of f.twins) prevSay[t.id] = t.say;
+        if (fresh.length === 0) {
+          await sleep(QUIET_FRAME_MS);
+          continue;
+        }
+        for (const t of fresh) {
+          if (playGen.current !== gen) return;
+          setCaption({ twinId: t.id, name: t.name, color: hexColor(t.colorHex), text: t.say! });
+          setSpeakingId(t.id);
+          await sleep(captionDur(t.say!));
+        }
+      }
+      if (playGen.current !== gen) return;
+      setCaption(null);
+      setSpeakingId(null);
+      refreshPanel();
+    },
+    [refreshPanel]
+  );
+
   useEffect(() => {
     const socket = io(API, { transports: ["websocket", "polling"] });
     socket.on("connect", () => setLive(true));
     socket.on("disconnect", () => setLive(false));
     socket.on("world", (w: WorldState) => setState(w));
     socket.on("day", ({ frames }: { frames: WorldState[] }) => {
-      timers.current.forEach(clearTimeout);
-      timers.current = frames.map((f, i) => setTimeout(() => setState(f), i * FRAME_MS));
-      // refresh the owner panel once the day has played out
-      timers.current.push(setTimeout(() => refreshPanel(), frames.length * FRAME_MS + 400));
+      void playEpisode(frames);
     });
     return () => {
-      timers.current.forEach(clearTimeout);
+      playGen.current += 1; // cancel any in-flight playback
       socket.disconnect();
     };
-  }, [refreshPanel]);
+  }, [playEpisode]);
 
   const liveADay = async () => {
     setBusy(true);
@@ -140,10 +188,29 @@ export default function Page() {
       </div>
 
       {state ? (
-        <WorldCanvas state={state} myTwinId={myTwinId} />
+        <WorldCanvas state={state} myTwinId={myTwinId} speakingTwinId={speakingId} />
       ) : (
         <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#7f93c4", ...mono }}>
           Connecting to the village…
+        </div>
+      )}
+
+      {/* ---- TV caption bar (reality-show subtitles) ---- */}
+      {caption && (
+        <div
+          key={`${caption.twinId}:${caption.text}`}
+          style={{
+            position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)",
+            zIndex: 11, width: "min(660px, 82vw)", boxSizing: "border-box",
+            background: "rgba(7,11,22,0.95)", border: "1px solid #24365c",
+            borderLeft: `3px solid ${caption.color}`, borderRadius: 10,
+            padding: "10px 16px 11px", boxShadow: "0 6px 24px rgba(0,0,0,0.5)", ...mono
+          }}
+        >
+          <div style={{ color: caption.color, fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
+            ● {caption.name.toUpperCase()}
+          </div>
+          <div style={{ color: "#e6edf7", fontSize: 13, lineHeight: 1.45 }}>{caption.text}</div>
         </div>
       )}
 

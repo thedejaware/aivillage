@@ -39,6 +39,22 @@ export const DEFAULT_ZONES: WorldZone[] = [
   { name: "event_space", col: 6, row: 6 }
 ];
 
+// Drama-village venue identity: zone ids stay stable (DB, planner), but every
+// zone reads as a PLACE where a specific kind of drama happens.
+export const ZONE_DISPLAY: Record<string, string> = {
+  plaza: "THE STAGE",
+  maker_space: "THE CAFÉ",
+  network_hub: "QUIET CORNER",
+  event_space: "THE LAWN"
+};
+
+export const ZONE_TAGLINE: Record<string, string> = {
+  plaza: "big moves happen here",
+  maker_space: "chats & gossip",
+  network_hub: "schemes are hatched",
+  event_space: "friendships grow"
+};
+
 const PALETTE = [0xff9a5b, 0x3ddc97, 0xffd166, 0x5b8cff, 0xc98cff, 0xff6f9c, 0x5be0c8];
 
 /** Deterministic colour from an id so a twin always renders the same hue. */

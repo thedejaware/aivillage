@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
+import { ZONE_DISPLAY, ZONE_TAGLINE } from "@aivillage/shared";
 import type { WorldState, WorldTwinView, WorldStructureView, WorldZone, ProjectType } from "@aivillage/shared";
 
 const TILE_W = 64;
@@ -15,8 +16,7 @@ const ZONE_ACCENT: Record<string, number> = {
   plaza: 0x5be0c8, maker_space: 0xffa24b, network_hub: 0x3ddc97, event_space: 0xff9a5b
 };
 
-const prettyZone = (n: string) => n.replace(/_/g, " ").toUpperCase();
-const BUBBLE_TTL = 14; // seconds a speech bubble stays before fading
+const prettyZone = (n: string) => ZONE_DISPLAY[n] ?? n.replace(/_/g, " ").toUpperCase();
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 function hash(s: string): number {
   let h = 0;
@@ -53,11 +53,8 @@ interface TwinSprite {
   ring: Graphics;
   name: string;
   colorHex: number;
-  bubble: Container | null;
-  bubbleW: number;
-  bubbleH: number;
-  bubbleUntil: number;
-  say: string | null;
+  /** 💬 indicator shown above the twin while its caption is on the TV bar */
+  mark: Container;
   tx: number;
   ty: number;
   /** anchor: the twin's "home" spot from the last world frame (wander returns near it) */
@@ -87,18 +84,32 @@ interface Scene {
   sprays: Graphics[];
   motes: { g: Graphics; x: number; y: number; v: number; a: number }[];
   myId: { readonly current: string | null };
+  speakingId: { readonly current: string | null };
   tick: number;
 }
 
-export default function WorldCanvas({ state, myTwinId }: { state: WorldState; myTwinId?: string | null }) {
+export default function WorldCanvas({
+  state,
+  myTwinId,
+  speakingTwinId
+}: {
+  state: WorldState;
+  myTwinId?: string | null;
+  speakingTwinId?: string | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const pending = useRef<WorldState>(state);
   const myIdRef = useRef<string | null>(myTwinId ?? null);
+  const speakingRef = useRef<string | null>(speakingTwinId ?? null);
 
   useEffect(() => {
     myIdRef.current = myTwinId ?? null;
   }, [myTwinId]);
+
+  useEffect(() => {
+    speakingRef.current = speakingTwinId ?? null;
+  }, [speakingTwinId]);
 
   const zoom = (factor: number) => {
     const sc = sceneRef.current;
@@ -158,11 +169,12 @@ export default function WorldCanvas({ state, myTwinId }: { state: WorldState; my
       const scene: Scene = {
         app, world, entities, twins: new Map(), structures: new Set(),
         occupied: new Set(), overflow: new Map(), zones: pending.current.zones,
-        sprays: [], motes: [], myId: myIdRef, tick: 0
+        sprays: [], motes: [], myId: myIdRef, speakingId: speakingRef, tick: 0
       };
       sceneRef.current = scene;
 
       drawZoneLabels(world, pending.current.zones);
+      drawVenueProps(scene, pending.current.zones);
       spawnMotes(scene, world);
 
       app.ticker.add(() => animate(scene));
@@ -287,14 +299,93 @@ function drawZoneLabels(world: Container, zones: WorldZone[]): void {
       style: new TextStyle({ fill: accent, fontSize: 11, fontFamily: "monospace", letterSpacing: 2, fontWeight: "bold" })
     });
     label.anchor.set(0.5, 0.5);
+    const tag = new Text({
+      text: ZONE_TAGLINE[z.name] ?? "",
+      style: new TextStyle({ fill: 0x8fa8d8, fontSize: 8.5, fontFamily: "monospace", fontStyle: "italic" })
+    });
+    tag.anchor.set(0.5, 0);
     const pill = new Graphics();
     const px = isoX(z.col, z.row);
     const py = isoY(z.col, z.row) + TILE_H * 2.4;
-    pill.roundRect(px - label.width / 2 - 8, py - 9, label.width + 16, 18, 4).fill({ color: 0x060a14, alpha: 0.85 });
-    pill.roundRect(px - label.width / 2 - 8, py - 9, label.width + 16, 18, 4).stroke({ color: accent, alpha: 0.4, width: 1 });
+    const pw = Math.max(label.width, tag.width) + 16;
+    pill.roundRect(px - pw / 2, py - 9, pw, 30, 4).fill({ color: 0x060a14, alpha: 0.85 });
+    pill.roundRect(px - pw / 2, py - 9, pw, 30, 4).stroke({ color: accent, alpha: 0.4, width: 1 });
     label.x = px;
     label.y = py;
-    world.addChild(pill, label);
+    tag.x = px;
+    tag.y = py + 8;
+    world.addChild(pill, label, tag);
+  }
+}
+
+/** Static scenery that gives each venue its identity (why a place exists). */
+function drawVenueProps(sc: Scene, zones: WorldZone[]): void {
+  for (const z of zones) {
+    const c = new Container();
+    const g = new Graphics();
+    c.addChild(g);
+    const x = isoX(z.col, z.row);
+    const gy = isoY(z.col, z.row) + TILE_H / 2;
+
+    switch (z.name) {
+      case "maker_space": { // THE CAFÉ — two little tables with cups + an awning stand
+        for (const [tx, ty] of [[-40, -14], [34, 10]] as const) {
+          isoBox(g, x + tx, gy + ty, 8, 7, 0x8a5a34); // table
+          g.circle(x + tx - 3, gy + ty - 9, 1.6).fill({ color: 0xfff3c4 }); // cups
+          g.circle(x + tx + 3, gy + ty - 9, 1.6).fill({ color: 0x9fd9ff });
+        }
+        isoBox(g, x - 2, gy - 34, 10, 12, 0xa8442e); // counter
+        g.poly([x - 2, gy - 56, x + 14, gy - 48, x - 2, gy - 40, x - 18, gy - 48]).fill({ color: 0xd94f4f }); // awning
+        g.poly([x - 2, gy - 56, x + 14, gy - 48, x - 2, gy - 40, x - 18, gy - 48]).stroke({ color: 0xffe9c4, alpha: 0.5, width: 1 });
+        g.circle(x + 12, gy - 40, 1.8).fill({ color: 0xffd166, alpha: 0.95 }); // lantern
+        break;
+      }
+      case "plaza": { // THE STAGE — platform, posts, truss, spotlights
+        isoBox(g, x, gy + 3, 22, 6, 0x8a4a2e);
+        isoBox(g, x - 17, gy - 5, 1.8, 20, 0x333a4d);
+        isoBox(g, x + 17, gy - 5, 1.8, 20, 0x333a4d);
+        g.rect(x - 18, gy - 26, 36, 3).fill({ color: 0x222836 });
+        for (const lx of [-12, 0, 12]) {
+          g.circle(x + lx, gy - 22, 6).fill({ color: 0xffe28a, alpha: 0.16 });
+          g.circle(x + lx, gy - 22, 2).fill({ color: 0xfff3c4, alpha: 0.95 });
+          g.poly([x + lx - 5, gy + 2, x + lx + 5, gy + 2, x + lx + 2, gy - 20, x + lx - 2, gy - 20]).fill({ color: 0xffe28a, alpha: 0.05 }); // light cone
+        }
+        break;
+      }
+      case "event_space": { // THE LAWN — picnic blanket, bushes, string lights
+        g.poly([x, gy - 9, x + 16, gy, x, gy + 9, x - 16, gy]).fill({ color: 0xd94f6a, alpha: 0.8 }); // blanket
+        g.poly([x, gy - 9, x + 16, gy, x, gy + 9, x - 16, gy]).stroke({ color: 0xffe9c4, alpha: 0.5, width: 1 });
+        for (const [bx, by, r] of [[-34, -12, 5], [30, -18, 6], [38, 12, 4.5]] as const) {
+          g.circle(x + bx, gy + by, r).fill({ color: 0x1f8a54 });
+          g.circle(x + bx - 1, gy + by - 2, r * 0.7).fill({ color: 0x3ddc97 });
+        }
+        // string lights between two poles
+        isoBox(g, x - 44, gy - 2, 1.4, 16, 0x333a4d);
+        isoBox(g, x + 44, gy - 6, 1.4, 16, 0x333a4d);
+        g.moveTo(x - 44, gy - 18).quadraticCurveTo(x, gy - 8, x + 44, gy - 22).stroke({ color: 0x556, width: 1 });
+        for (let i = 1; i < 6; i++) {
+          const t = i / 6;
+          const lx2 = x - 44 + t * 88;
+          const ly2 = gy - 18 + (1 - (2 * t - 1) ** 2) * 9 - t * 4;
+          g.circle(lx2, ly2, 1.5).fill({ color: [0xffd166, 0xff6f9c, 0x5be0c8, 0x9fd9ff, 0xffd166][i - 1], alpha: 0.95 });
+        }
+        break;
+      }
+      case "network_hub": { // QUIET CORNER — bench, dim lamp, leafless tree
+        isoBox(g, x - 6, gy + 2, 12, 5, 0x4a3a2c); // bench seat
+        isoBox(g, x - 6, gy - 3, 12, 1.6, 0x5a4636); // backrest
+        isoBox(g, x + 26, gy - 2, 1.6, 22, 0x333a4d); // lamp post
+        g.circle(x + 26, gy - 26, 5).fill({ color: 0x9fb4d8, alpha: 0.14 });
+        g.circle(x + 26, gy - 26, 1.8).fill({ color: 0xcfe0ff, alpha: 0.85 });
+        // bare tree
+        g.moveTo(x - 34, gy + 4).lineTo(x - 36, gy - 16).stroke({ color: 0x3a2f28, width: 2.4 });
+        g.moveTo(x - 36, gy - 10).lineTo(x - 43, gy - 20).stroke({ color: 0x3a2f28, width: 1.6 });
+        g.moveTo(x - 36, gy - 14).lineTo(x - 29, gy - 24).stroke({ color: 0x3a2f28, width: 1.6 });
+        break;
+      }
+    }
+    c.zIndex = gy;
+    sc.entities.addChild(c);
   }
 }
 
@@ -456,6 +547,18 @@ function createTwin(t: WorldTwinView, sc: Scene): TwinSprite {
   nameBg.roundRect(-name.width / 2 - 4, name.y - 1, name.width + 8, name.height + 2, 3).fill({ color: 0x070b16, alpha: 0.65 });
   root.addChild(nameBg, name);
 
+  // 💬 marker: lights up while this twin's line is on the TV caption bar
+  const mark = new Container();
+  const markBg = new Graphics();
+  markBg.roundRect(-9, -8, 18, 14, 5).fill({ color: t.colorHex, alpha: 0.95 });
+  markBg.poly([-3, 6, 3, 6, 0, 11]).fill({ color: t.colorHex, alpha: 0.95 });
+  const markDots = new Graphics();
+  for (const dx of [-4.5, 0, 4.5]) markDots.circle(dx, -1, 1.4).fill({ color: 0x0a0f1c });
+  mark.addChild(markBg, markDots);
+  mark.y = -38;
+  mark.visible = false;
+  root.addChild(mark);
+
   root.x = isoX(t.col, t.row);
   root.y = isoY(t.col, t.row);
   root.zIndex = root.y + 1000; // twins in front of same-row structures
@@ -464,69 +567,13 @@ function createTwin(t: WorldTwinView, sc: Scene): TwinSprite {
   const now = performance.now() / 1000;
   return {
     root, figure, legL, legR, armL, armR, ring,
-    name: t.name, colorHex: t.colorHex,
-    bubble: null, bubbleW: 0, bubbleH: 0, bubbleUntil: 0, say: null,
+    name: t.name, colorHex: t.colorHex, mark,
     tx: root.x, ty: root.y, ax: root.x, ay: root.y,
     nextTx: root.x, nextTy: root.y, applyAt: 0,
-    nextWanderAt: now + 1.5 + Math.random() * 4,
+    nextWanderAt: now + 3 + Math.random() * 6,
     speed: 0.038 + ((hash(t.id) >> 4) % 28) / 1000, // 0.038–0.066: everyone walks differently
     walk: 0, phase: (hash(t.id) % 628) / 100
   };
-}
-
-function updateBubble(spr: TwinSprite, sayText: string, sc: Scene): void {
-  if (spr.bubble) {
-    spr.root.removeChild(spr.bubble);
-    spr.bubble.destroy({ children: true });
-    spr.bubble = null;
-  }
-  if (!sayText) return;
-
-  const pad = 8;
-  // Speaker name header (Antigravity-style) + the FULL message — no truncation.
-  const header = new Text({
-    text: spr.name.toUpperCase(),
-    style: new TextStyle({ fill: spr.colorHex, fontSize: 9, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 })
-  });
-  const txt = new Text({
-    text: sayText,
-    style: new TextStyle({ fill: 0xe6edf7, fontSize: 10, fontFamily: "monospace", wordWrap: true, wordWrapWidth: 170, lineHeight: 14 })
-  });
-  const bw = Math.max(header.width, txt.width) + pad * 2;
-  const bh = header.height + 3 + txt.height + pad * 2;
-
-  const bubble = new Container();
-  const bg = new Graphics();
-  bg.roundRect(-bw / 2, 0, bw, bh, 6).fill({ color: 0x0a0f1c, alpha: 0.96 }).stroke({ color: 0x3a5a8a, width: 1, alpha: 0.9 });
-  bg.poly([-4, bh, 4, bh, 0, bh + 6]).fill({ color: 0x0a0f1c, alpha: 0.96 });
-  header.x = -bw / 2 + pad;
-  header.y = pad - 1;
-  txt.x = -bw / 2 + pad;
-  txt.y = pad + header.height + 2;
-  bubble.addChild(bg, header, txt);
-  bubble.y = -34 - bh;
-  spr.root.addChild(bubble);
-  spr.bubble = bubble;
-  spr.bubbleW = bw;
-  spr.bubbleH = bh;
-  spr.bubbleUntil = performance.now() / 1000 + BUBBLE_TTL;
-
-  // Collision layout: push this bubble upward until it overlaps no other live bubble.
-  for (let iter = 0; iter < 8; iter++) {
-    let moved = false;
-    for (const other of sc.twins.values()) {
-      if (other === spr || !other.bubble) continue;
-      const a = { x: spr.root.x - spr.bubbleW / 2, y: spr.root.y + bubble.y, w: spr.bubbleW, h: spr.bubbleH };
-      const b = { x: other.root.x - other.bubbleW / 2, y: other.root.y + other.bubble.y, w: other.bubbleW, h: other.bubbleH };
-      const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-      const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-      if (ix > 4 && iy > 0) {
-        bubble.y -= iy + 10;
-        moved = true;
-      }
-    }
-    if (!moved) break;
-  }
 }
 
 // ---------------- reconcile & animate ----------------
@@ -588,10 +635,6 @@ function reconcile(sc: Scene, s: WorldState): void {
       spr.nextTy = ny;
       spr.applyAt = performance.now() / 1000 + Math.random() * 0.9;
     }
-    if (spr.say !== (t.say ?? null)) {
-      spr.say = t.say ?? null;
-      updateBubble(spr, t.say ?? "", sc);
-    }
   }
   for (const st of s.structures) {
     if (!sc.structures.has(st.id)) {
@@ -603,7 +646,7 @@ function reconcile(sc: Scene, s: WorldState): void {
 
 function animate(sc: Scene): void {
   const t = performance.now() / 1000;
-  for (const spr of sc.twins.values()) {
+  for (const [id, spr] of sc.twins) {
     // apply a staggered frame target once its delay elapses
     if (spr.applyAt > 0 && t >= spr.applyAt) {
       spr.tx = spr.nextTx;
@@ -620,37 +663,32 @@ function animate(sc: Scene): void {
     if (dist > 0.6) {
       spr.root.x += dx * spr.speed;
       spr.root.y += dy * spr.speed;
-      spr.walk += 0.33;
-      spr.legL.y = Math.sin(spr.walk) * 2.1;
-      spr.legR.y = Math.sin(spr.walk + Math.PI) * 2.1;
-      spr.armL.y = Math.sin(spr.walk + Math.PI) * 1.7; // arms swing opposite the legs
-      spr.armR.y = Math.sin(spr.walk) * 1.7;
-      spr.figure.y = TILE_H / 2 - Math.abs(Math.sin(spr.walk)) * 1.6;
+      spr.walk += 0.28;
+      spr.legL.y = Math.sin(spr.walk) * 1.8;
+      spr.legR.y = Math.sin(spr.walk + Math.PI) * 1.8;
+      spr.armL.y = Math.sin(spr.walk + Math.PI) * 1.4; // arms swing opposite the legs
+      spr.armR.y = Math.sin(spr.walk) * 1.4;
+      spr.figure.y = TILE_H / 2 - Math.abs(Math.sin(spr.walk)) * 0.7; // gentle step, not a hop
     } else {
       spr.legL.y = 0;
       spr.legR.y = 0;
       spr.armL.y = 0;
       spr.armR.y = 0;
-      spr.figure.y = TILE_H / 2 + Math.sin(t * 1.8 + spr.phase) * 1.4;
-      // ambient life: idle twins take a short stroll near their anchor every few seconds
+      spr.figure.y = TILE_H / 2 + Math.sin(t * 1.1 + spr.phase) * 0.4; // subtle breathing only
+      // ambient life: an occasional short stroll near the anchor — calm, not jittery
       if (t >= spr.nextWanderAt) {
-        spr.tx = spr.ax + (Math.random() - 0.5) * TILE_W * 1.5;
-        spr.ty = spr.ay + (Math.random() - 0.5) * TILE_H * 1.5;
-        spr.nextWanderAt = t + 4 + Math.random() * 8;
+        spr.tx = spr.ax + (Math.random() - 0.5) * TILE_W * 0.9;
+        spr.ty = spr.ay + (Math.random() - 0.5) * TILE_H * 0.9;
+        spr.nextWanderAt = t + 7 + Math.random() * 10;
       }
     }
     spr.root.zIndex = spr.root.y + 1000;
     const pulse = 1 + Math.sin(t * 2.2 + spr.phase) * 0.12;
     spr.ring.scale.set(pulse, pulse);
-    // Bubbles fade out after their time on screen (keeps the village readable).
-    if (spr.bubble && t > spr.bubbleUntil) {
-      spr.bubble.alpha -= 0.02;
-      if (spr.bubble.alpha <= 0) {
-        spr.root.removeChild(spr.bubble);
-        spr.bubble.destroy({ children: true });
-        spr.bubble = null;
-      }
-    }
+    // 💬 marker follows the TV caption bar: visible only while this twin speaks.
+    const speaking = sc.speakingId.current === id;
+    spr.mark.visible = speaking;
+    if (speaking) spr.mark.y = -38 + Math.sin(t * 3.2) * 1.6;
   }
   for (const sp of sc.sprays) {
     sp.alpha = 0.65 + Math.sin(t * 3 + sp.x) * 0.3;
