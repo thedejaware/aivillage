@@ -16,7 +16,7 @@ const ZONE_ACCENT: Record<string, number> = {
 };
 
 const prettyZone = (n: string) => n.replace(/_/g, " ").toUpperCase();
-const short = (s: string) => (s.length > 56 ? s.slice(0, 54).trimEnd() + "…" : s);
+const BUBBLE_TTL = 14; // seconds a speech bubble stays before fading
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 function hash(s: string): number {
   let h = 0;
@@ -48,8 +48,15 @@ interface TwinSprite {
   figure: Container;
   legL: Graphics;
   legR: Graphics;
+  armL: Graphics;
+  armR: Graphics;
   ring: Graphics;
+  name: string;
+  colorHex: number;
   bubble: Container | null;
+  bubbleW: number;
+  bubbleH: number;
+  bubbleUntil: number;
   say: string | null;
   tx: number;
   ty: number;
@@ -456,7 +463,9 @@ function createTwin(t: WorldTwinView, sc: Scene): TwinSprite {
 
   const now = performance.now() / 1000;
   return {
-    root, figure, legL, legR, ring, bubble: null, say: null,
+    root, figure, legL, legR, armL, armR, ring,
+    name: t.name, colorHex: t.colorHex,
+    bubble: null, bubbleW: 0, bubbleH: 0, bubbleUntil: 0, say: null,
     tx: root.x, ty: root.y, ax: root.x, ay: root.y,
     nextTx: root.x, nextTy: root.y, applyAt: 0,
     nextWanderAt: now + 1.5 + Math.random() * 4,
@@ -465,27 +474,59 @@ function createTwin(t: WorldTwinView, sc: Scene): TwinSprite {
   };
 }
 
-function updateBubble(spr: TwinSprite, sayText: string): void {
+function updateBubble(spr: TwinSprite, sayText: string, sc: Scene): void {
   if (spr.bubble) {
     spr.root.removeChild(spr.bubble);
     spr.bubble.destroy({ children: true });
     spr.bubble = null;
   }
   if (!sayText) return;
-  const pad = 6;
-  const txt = new Text({ text: short(sayText), style: new TextStyle({ fill: 0xd7e4ff, fontSize: 9, fontFamily: "monospace", wordWrap: true, wordWrapWidth: 118, lineHeight: 12 }) });
-  const bw = txt.width + pad * 2;
-  const bh = txt.height + pad * 2;
+
+  const pad = 8;
+  // Speaker name header (Antigravity-style) + the FULL message — no truncation.
+  const header = new Text({
+    text: spr.name.toUpperCase(),
+    style: new TextStyle({ fill: spr.colorHex, fontSize: 9, fontFamily: "monospace", fontWeight: "bold", letterSpacing: 1 })
+  });
+  const txt = new Text({
+    text: sayText,
+    style: new TextStyle({ fill: 0xe6edf7, fontSize: 10, fontFamily: "monospace", wordWrap: true, wordWrapWidth: 170, lineHeight: 14 })
+  });
+  const bw = Math.max(header.width, txt.width) + pad * 2;
+  const bh = header.height + 3 + txt.height + pad * 2;
+
   const bubble = new Container();
   const bg = new Graphics();
-  bg.roundRect(-bw / 2, 0, bw, bh, 6).fill({ color: 0x0a1120, alpha: 0.95 }).stroke({ color: 0x3a7bd5, width: 1, alpha: 0.8 });
-  bg.poly([-4, bh, 4, bh, 0, bh + 6]).fill({ color: 0x0a1120, alpha: 0.95 });
+  bg.roundRect(-bw / 2, 0, bw, bh, 6).fill({ color: 0x0a0f1c, alpha: 0.96 }).stroke({ color: 0x3a5a8a, width: 1, alpha: 0.9 });
+  bg.poly([-4, bh, 4, bh, 0, bh + 6]).fill({ color: 0x0a0f1c, alpha: 0.96 });
+  header.x = -bw / 2 + pad;
+  header.y = pad - 1;
   txt.x = -bw / 2 + pad;
-  txt.y = pad;
-  bubble.addChild(bg, txt);
+  txt.y = pad + header.height + 2;
+  bubble.addChild(bg, header, txt);
   bubble.y = -34 - bh;
   spr.root.addChild(bubble);
   spr.bubble = bubble;
+  spr.bubbleW = bw;
+  spr.bubbleH = bh;
+  spr.bubbleUntil = performance.now() / 1000 + BUBBLE_TTL;
+
+  // Collision layout: push this bubble upward until it overlaps no other live bubble.
+  for (let iter = 0; iter < 8; iter++) {
+    let moved = false;
+    for (const other of sc.twins.values()) {
+      if (other === spr || !other.bubble) continue;
+      const a = { x: spr.root.x - spr.bubbleW / 2, y: spr.root.y + bubble.y, w: spr.bubbleW, h: spr.bubbleH };
+      const b = { x: other.root.x - other.bubbleW / 2, y: other.root.y + other.bubble.y, w: other.bubbleW, h: other.bubbleH };
+      const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      if (ix > 4 && iy > 0) {
+        bubble.y -= iy + 10;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 // ---------------- reconcile & animate ----------------
@@ -549,7 +590,7 @@ function reconcile(sc: Scene, s: WorldState): void {
     }
     if (spr.say !== (t.say ?? null)) {
       spr.say = t.say ?? null;
-      updateBubble(spr, t.say ?? "");
+      updateBubble(spr, t.say ?? "", sc);
     }
   }
   for (const st of s.structures) {
@@ -582,10 +623,14 @@ function animate(sc: Scene): void {
       spr.walk += 0.33;
       spr.legL.y = Math.sin(spr.walk) * 2.1;
       spr.legR.y = Math.sin(spr.walk + Math.PI) * 2.1;
+      spr.armL.y = Math.sin(spr.walk + Math.PI) * 1.7; // arms swing opposite the legs
+      spr.armR.y = Math.sin(spr.walk) * 1.7;
       spr.figure.y = TILE_H / 2 - Math.abs(Math.sin(spr.walk)) * 1.6;
     } else {
       spr.legL.y = 0;
       spr.legR.y = 0;
+      spr.armL.y = 0;
+      spr.armR.y = 0;
       spr.figure.y = TILE_H / 2 + Math.sin(t * 1.8 + spr.phase) * 1.4;
       // ambient life: idle twins take a short stroll near their anchor every few seconds
       if (t >= spr.nextWanderAt) {
@@ -597,6 +642,15 @@ function animate(sc: Scene): void {
     spr.root.zIndex = spr.root.y + 1000;
     const pulse = 1 + Math.sin(t * 2.2 + spr.phase) * 0.12;
     spr.ring.scale.set(pulse, pulse);
+    // Bubbles fade out after their time on screen (keeps the village readable).
+    if (spr.bubble && t > spr.bubbleUntil) {
+      spr.bubble.alpha -= 0.02;
+      if (spr.bubble.alpha <= 0) {
+        spr.root.removeChild(spr.bubble);
+        spr.bubble.destroy({ children: true });
+        spr.bubble = null;
+      }
+    }
   }
   for (const sp of sc.sprays) {
     sp.alpha = 0.65 + Math.sin(t * 3 + sp.x) * 0.3;
