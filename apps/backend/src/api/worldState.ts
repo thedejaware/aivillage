@@ -7,6 +7,7 @@ import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 /** Build the render-ready WorldState from the database (twins, structures, last narration). */
 export async function buildWorldState(): Promise<WorldState> {
   const db = getDb();
+  const readAt = new Date();
   const twins = await new DrizzleTwinRepository(db).listAll();
   const structures = await new DrizzleStructureRepository(db).listAll();
   const memRepo = new DrizzleMemoryRepository(db);
@@ -17,5 +18,5 @@ export async function buildWorldState(): Promise<WorldState> {
     if (recent.length > 0) saysByTwinId[t.id] = recent[0].content;
   }
 
-  return toWorldState({ zones: DEFAULT_ZONES, twins, structures, saysByTwinId });
+  return toWorldState({ zones: DEFAULT_ZONES, twins, structures, saysByTwinId, now: readAt });
 }

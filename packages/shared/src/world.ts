@@ -1,4 +1,5 @@
 import type { Twin, Structure, ProjectType } from "./types.js";
+import { isOrderActive, type OwnerOrder } from "./orders.js";
 
 // --- Render-oriented world state (what the PixiJS renderer consumes) ---
 export interface WorldZone {
@@ -15,6 +16,8 @@ export interface WorldTwinView {
   row: number;
   say: string | null;
   flag: string | null;
+  /** active owner order, if any — the renderer walks the twin there and holds it */
+  order: Pick<OwnerOrder, "kind" | "zone" | "targetName" | "label"> | null;
 }
 
 export interface WorldStructureView {
@@ -26,6 +29,8 @@ export interface WorldStructureView {
 }
 
 export interface WorldState {
+  /** when the snapshot's data was read (ISO) — lets clients drop stale snapshots */
+  asOf?: string;
   zones: WorldZone[];
   twins: WorldTwinView[];
   structures: WorldStructureView[];
@@ -111,6 +116,8 @@ export interface ToWorldStateInput {
   flagByTwinId?: Record<string, string>;
   /** explicit tile position per twin id — overrides zone placement (used for movement/playback) */
   positionsByTwinId?: Record<string, { col: number; row: number }>;
+  /** clock for order expiry (defaults to now) */
+  now?: Date;
 }
 
 /** Pure mapper: domain entities -> render state. The renderer never sees domain types. */
@@ -118,6 +125,7 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
   const zoneByName = new Map(input.zones.map((z) => [z.name, z]));
   const fallback = input.zones[0];
   const countByZone: Record<string, number> = {};
+  const now = input.now ?? new Date();
 
   const twins: WorldTwinView[] = input.twins.map((t) => {
     const override = input.positionsByTwinId?.[t.id];
@@ -141,7 +149,10 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
       col,
       row,
       say: input.saysByTwinId?.[t.id] ?? null,
-      flag: input.flagByTwinId?.[t.id] ?? null
+      flag: input.flagByTwinId?.[t.id] ?? null,
+      order: t.order && isOrderActive(t.order, now)
+        ? { kind: t.order.kind, zone: t.order.zone, targetName: t.order.targetName, label: t.order.label }
+        : null
     };
   });
 
@@ -159,5 +170,43 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
     return { id: s.id, type: s.type, col: spot.col, row: spot.row, builtByTwinId: s.builtByTwinId ?? null };
   });
 
-  return { zones: input.zones, twins, structures };
+  return { asOf: now.toISOString(), zones: input.zones, twins, structures };
+}
+
+/** What each venue looks like when a twin hangs out there. */
+export const ZONE_EMOJI: Record<string, string> = {
+  maker_space: "☕", event_space: "🌸", network_hub: "💭", plaza: "🎤"
+};
+
+/** One-line status for a twin following an owner order (3D label + chat panel). */
+export function orderStatus(order: NonNullable<WorldTwinView["order"]>, arrived: boolean): string {
+  if (order.kind === "stay") return `📍 ${order.label}`;
+  if (!arrived) return `🚶 ${order.label}`;
+  if (order.kind === "talk_to") return `💬 Talking with ${order.targetName}`;
+  return `${ZONE_EMOJI[order.zone] ?? "📍"} At ${ZONE_DISPLAY[order.zone] ?? order.zone}`;
+}
+
+/** Everything the Inspector shows about one villager (GET /api/twins/:id). */
+export interface TwinDetail {
+  id: string;
+  name: string;
+  colorHex: number;
+  isNpc: boolean;
+  /** true when the viewer owns this twin */
+  isMine: boolean;
+  traits: string[];
+  goals: string[];
+  zone: string;
+  zoneLabel: string;
+  reputation: number;
+  /** 0..DAILY_ENERGY */
+  energy: number;
+  popularity: number;
+  /** 1-based leaderboard position */
+  rank: number;
+  villagerCount: number;
+  /** e.g. "🚶 Heading to THE CAFÉ"; null when living freely */
+  orderStatus: string | null;
+  relationships: { name: string; label: string; score: number }[];
+  recent: { id: string; kind: string; content: string; createdAt: string }[];
 }

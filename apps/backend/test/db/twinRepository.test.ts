@@ -44,6 +44,19 @@ describe("DrizzleTwinRepository", () => {
     expect(got!.locationZone).toBe("maker_space");
   });
 
+  it("persists the owner order and clears it again", async () => {
+    const id = "33333333-3333-3333-3333-333333333333";
+    const order = {
+      kind: "go" as const, zone: "maker_space", targetName: null, label: "Heading to THE CAFÉ",
+      issuedAt: "2026-10-06T12:00:00.000Z", holdUntil: "2026-10-06T12:10:00.000Z"
+    };
+    await repo.save({ ...newTwin(id), order });
+    expect((await repo.getById(id))!.order).toEqual(order);
+    expect((await repo.listAll()).find((t) => t.id === id)!.order).toEqual(order);
+    await repo.save({ ...newTwin(id), order: null });
+    expect((await repo.getById(id))!.order).toBeNull();
+  });
+
   it("updates an existing twin on save (upsert)", async () => {
     const id = "22222222-2222-2222-2222-222222222222";
     await repo.save(newTwin(id));

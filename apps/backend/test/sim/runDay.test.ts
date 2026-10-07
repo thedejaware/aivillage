@@ -244,4 +244,60 @@ describe("runDay venue routing", () => {
       await tdb.stop();
     }
   }, 60_000);
+
+  // ─── owner orders: a twin following its owner's order is never dragged away ───
+
+  const holdAt = (zone: string) =>
+    JSON.stringify({
+      kind: "go", zone, targetName: null, label: "Heading there",
+      issuedAt: new Date().toISOString(), holdUntil: new Date(Date.now() + 10 * 60_000).toISOString()
+    });
+
+  async function makeOrderedDb() {
+    const tdb = await startTestDb();
+    // @ts-expect-error drizzle exposes raw client via session.client
+    const client = tdb.db.session.client as { unsafe: (q: string) => Promise<{ id: string }[]> };
+    const [npc] = await client.unsafe(
+      `insert into twins (name, is_npc, energy, energy_updated_at, location_zone)
+       values ('Npc', true, 10, now(), 'plaza') returning id`
+    );
+    const [mine] = await client.unsafe(
+      `insert into twins (name, is_npc, energy, energy_updated_at, location_zone, owner_order)
+       values ('Mine', false, 10, now(), 'event_space', '${holdAt("event_space")}'::jsonb) returning id`
+    );
+    return { tdb, npcId: npc.id, mineId: mine.id };
+  }
+
+  it("order: a villager who chats with an ordered twin comes to it (scene at the twin's zone)", async () => {
+    const { tdb, npcId } = await makeOrderedDb();
+    try {
+      const llm = new CannedLlmClient([mkChat("Npc", "Mine"), mkConvo("Npc", "Mine")]);
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [npcId], db: tdb.db });
+      const frame = frames[0];
+      const mine = frame.twins.find((t) => t.name === "Mine")!;
+      const npc = frame.twins.find((t) => t.name === "Npc")!;
+      near(mine.col, EVENT_SPACE.col);
+      near(mine.row, EVENT_SPACE.row);
+      near(npc.col, EVENT_SPACE.col);
+      near(npc.row, EVENT_SPACE.row);
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("order: the ordered twin's own beat does not move it away", async () => {
+    const { tdb, mineId } = await makeOrderedDb();
+    try {
+      const llm = new CannedLlmClient([mkScheme("Mine")]);
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [mineId], db: tdb.db });
+      const mine = frames[0].twins.find((t) => t.name === "Mine")!;
+      near(mine.col, EVENT_SPACE.col);
+      near(mine.row, EVENT_SPACE.row);
+      const saved = await new DrizzleTwinRepository(tdb.db).getById(mineId);
+      expect(saved?.locationZone).toBe("event_space");
+      expect(saved?.order?.zone).toBe("event_space"); // the order survives the beat
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
 });

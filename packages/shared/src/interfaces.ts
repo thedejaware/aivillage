@@ -21,10 +21,30 @@ export interface WalletRepository {
   applyDelta(userId: string, delta: number, reason: string): Promise<Wallet>;
 }
 
+/** A tool the model may call (JSON-schema input, Anthropic tool shape). */
+export interface LlmTool {
+  name: string;
+  description: string;
+  input_schema: { type: "object"; properties: Record<string, unknown>; required?: string[] };
+}
+
+export interface ToolCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/** One model turn: what it said plus the tools it called. */
+export interface ToolTurn {
+  text: string;
+  toolCalls: ToolCall[];
+}
+
 /** The model boundary. Unit tests inject a fake; production wraps Claude. */
 export interface LlmClient {
   /** Return the model's raw text completion for a prompt. */
   generate(prompt: string): Promise<string>;
+  /** Optional: one turn with tool use (Claude). Clients without it fall back to JSON-in-text. */
+  generateWithTools?(prompt: string, tools: LlmTool[]): Promise<ToolTurn>;
 }
 
 export interface ProjectRepository {

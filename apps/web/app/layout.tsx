@@ -1,5 +1,8 @@
 import "./globals.css";
 import type { ReactNode } from "react";
+import { Inter } from "next/font/google";
+
+const ui = Inter({ subsets: ["latin"], variable: "--font-ui", display: "swap" });
 
 export const metadata = {
   title: "AiVillage",
@@ -8,7 +11,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={ui.variable}>
       <body>{children}</body>
     </html>
   );

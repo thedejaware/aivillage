@@ -1,5 +1,5 @@
 import { pgTable, text, integer, boolean, timestamp, jsonb, uuid } from "drizzle-orm/pg-core";
-import type { Skills } from "@aivillage/shared";
+import type { Skills, OwnerOrder } from "@aivillage/shared";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -20,7 +20,9 @@ export const twins = pgTable("twins", {
   locationZone: text("location_zone").notNull().default("plaza"),
   energy: integer("energy").notNull().default(0),
   energyUpdatedAt: timestamp("energy_updated_at", { withTimezone: true }).notNull().defaultNow(),
-  isNpc: boolean("is_npc").notNull().default(false)
+  isNpc: boolean("is_npc").notNull().default(false),
+  /** the owner's current order; null = living autonomously */
+  ownerOrder: jsonb("owner_order").$type<OwnerOrder | null>()
 });
 
 export const creditLedger = pgTable("credit_ledger", {
@@ -66,6 +68,14 @@ export const relationships = pgTable("relationships", {
   toTwinId: uuid("to_twin_id").notNull().references(() => twins.id),
   score: integer("score").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  twinId: uuid("twin_id").notNull().references(() => twins.id),
+  role: text("role").notNull(), // 'owner' | 'twin'
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 export const approvals = pgTable("approvals", {

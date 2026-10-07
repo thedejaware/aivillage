@@ -5,8 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch src/index.ts",
-    "api": "tsx watch src/api/server.ts",
+    "dev": "tsx watch src/api/server.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
@@ -16,7 +15,6 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.33.0",
     "express": "^5.2.1",
-    "node-cron": "^4.5.0",
     "postgres": "^3.4.4",
     "socket.io": "^4.8.3"
   },

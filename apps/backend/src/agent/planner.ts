@@ -5,6 +5,8 @@ export interface PlanContext {
   recentMemories: Memory[];
   /** this twin's current feelings toward others, as "Name: label" pairs */
   relationships?: { name: string; label: string }[];
+  /** v3: what the owner shared in chat — the twin's inner fuel for gossip & goals */
+  ownerFacts?: string[];
   /** legacy (v1 build loop) — ignored by the social prompt */
   activeProject?: { type: string; stepsDone: number; stepsTotal: number } | null;
 }
@@ -20,6 +22,12 @@ export function buildPrompt(twin: Twin, ctx: PlanContext): string {
     `Personality: ${twin.traits.join(", ") || "unremarkable"}. Your social goal: ${twin.goals.join(", ") || "find your place"}.`,
     `You are at "${twin.locationZone}". Villagers around: ${ctx.nearbyTwinNames.join(", ") || "no one"}.`,
     `How you feel about people:\n${rels}`,
+    ...(ctx.ownerFacts && ctx.ownerFacts.length > 0
+      ? [
+          `You are the twin of a real person — your owner. They confided in you:\n${ctx.ownerFacts.map((f) => `- ${f}`).join("\n")}`,
+          `Let what your owner shared drive your gossip, plans and choices (proudly mention their news, pursue their wishes, defend their honour).`
+        ]
+      : []),
     `What you just did:\n${memo}`,
     `Choose ONE action for this moment. Options:`,
     `- "chat": strike up a conversation (target = a villager's name)`,

@@ -1,3 +1,5 @@
+import type { OwnerOrder } from "./orders.js";
+
 export type SkillName = "building" | "coding" | "art" | "social";
 export type Skills = Record<SkillName, number>; // level per skill
 
@@ -14,6 +16,8 @@ export interface Twin {
   energy: number;
   energyUpdatedAt: string; // ISO timestamp
   isNpc: boolean;
+  /** the owner's current order (null/absent = living autonomously) */
+  order?: OwnerOrder | null;
 }
 
 export interface Wallet {

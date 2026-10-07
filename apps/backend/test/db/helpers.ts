@@ -21,7 +21,8 @@ const CREATE_SQL = `
     location_zone text not null default 'plaza',
     energy integer not null default 0,
     energy_updated_at timestamptz not null default now(),
-    is_npc boolean not null default false
+    is_npc boolean not null default false,
+    owner_order jsonb
   );
   create table credit_ledger (
     id uuid primary key default gen_random_uuid(),
@@ -66,6 +67,13 @@ const CREATE_SQL = `
     created_at timestamptz not null default now(),
     resolved_at timestamptz,
     consumed_at timestamptz
+  );
+  create table chat_messages (
+    id uuid primary key default gen_random_uuid(),
+    twin_id uuid not null references twins(id),
+    role text not null,
+    content text not null,
+    created_at timestamptz not null default now()
   );
   create table relationships (
     id uuid primary key default gen_random_uuid(),

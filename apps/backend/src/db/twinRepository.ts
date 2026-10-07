@@ -22,7 +22,8 @@ export class DrizzleTwinRepository implements TwinRepository {
       locationZone: r.locationZone,
       energy: r.energy,
       energyUpdatedAt: r.energyUpdatedAt.toISOString(),
-      isNpc: r.isNpc
+      isNpc: r.isNpc,
+      order: r.ownerOrder ?? null
     };
   }
 
@@ -39,7 +40,8 @@ export class DrizzleTwinRepository implements TwinRepository {
       locationZone: twin.locationZone,
       energy: twin.energy,
       energyUpdatedAt: new Date(twin.energyUpdatedAt),
-      isNpc: twin.isNpc
+      isNpc: twin.isNpc,
+      ownerOrder: twin.order ?? null
     };
     await this.db.insert(twins).values(row).onConflictDoUpdate({ target: twins.id, set: row });
   }
@@ -58,7 +60,8 @@ export class DrizzleTwinRepository implements TwinRepository {
       locationZone: r.locationZone,
       energy: r.energy,
       energyUpdatedAt: r.energyUpdatedAt.toISOString(),
-      isNpc: r.isNpc
+      isNpc: r.isNpc,
+      order: r.ownerOrder ?? null
     }));
   }
 }

@@ -1,2 +1,10 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; background: #05070f; overflow: hidden; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+html, body {
+  height: 100%;
+  background: #e9f0fb;
+  overflow: hidden;
+  font-family: var(--font-ui), Inter, system-ui, sans-serif;
+  color: #1b2433;
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font-family: inherit; }

@@ -1,13 +1,25 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
-import type { WorldState, Twin, Memory, Approval } from "@aivillage/shared";
+import { ZONE_DISPLAY, orderStatus } from "@aivillage/shared";
+import type { WorldState, WorldTwinView, Twin, Memory, Approval, TwinDetail } from "@aivillage/shared";
+import { zoneOfTile } from "../lib/village/layout";
+import { TopBar } from "../components/hud/TopBar";
+import { StatCards } from "../components/hud/StatCards";
+import { Inspector } from "../components/hud/Inspector";
+import { VillagerList, type VillagerRow } from "../components/hud/VillagerList";
+import { OrderTracker } from "../components/hud/OrderTracker";
+import { ApprovalCard } from "../components/hud/ApprovalCard";
+import { CaptionBar } from "../components/hud/CaptionBar";
+import { C, Z, card } from "../components/hud/theme";
 
-const WorldCanvas = dynamic(() => import("../components/WorldCanvas"), { ssr: false });
+const VillageCanvas = dynamic(() => import("../components/village/VillageCanvas"), { ssr: false });
+const TwinChat = dynamic(() => import("../components/TwinChat"), { ssr: false });
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const QUIET_FRAME_MS = 1100;
+const INSPECTOR_WIDTH = 340;
 
 /** One line on the TV caption bar (reality-show subtitles). */
 interface Caption {
@@ -20,6 +32,7 @@ interface Caption {
 const hexColor = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
 /** Reading time scaled to line length: 2s floor, 7s ceiling. */
 const captionDur = (text: string) => Math.min(7000, Math.max(2000, 1200 + text.length * 45));
+const orderKeyOf = (o: WorldTwinView["order"]) => (o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}` : "");
 
 interface Panel {
   twin: Twin | null;
@@ -33,35 +46,28 @@ function approvalText(a: Approval): React.ReactNode {
   if ("projectType" in a.payload) {
     return (
       <>
-        Your twin wants to build a <b style={{ color: "#9fd9ff" }}>{a.payload.projectType.replace(/_/g, " ")}</b> at{" "}
-        {a.payload.zone.replace(/_/g, " ")}.
+        Your twin wants to build a <b>{a.payload.projectType.replace(/_/g, " ")}</b> at {a.payload.zone.replace(/_/g, " ")}.
       </>
     );
   }
-  const t = <b style={{ color: "#9fd9ff" }}>{a.payload.targetName}</b>;
+  const t = <b>{a.payload.targetName}</b>;
   switch (a.payload.move) {
     case "confront":
-      return <>Your twin wants to publicly <b style={{ color: "#ff8a9c" }}>confront</b> {t}. Let it happen?</>;
+      return <>Your twin wants to publicly <b style={{ color: C.red }}>confront</b> {t}. Let it happen?</>;
     case "confess":
-      return <>Your twin wants to tell {t} they are its <b style={{ color: "#7fe0a8" }}>best friend</b>. Allow it?</>;
+      return <>Your twin wants to tell {t} they are its <b style={{ color: C.green }}>best friend</b>. Allow it?</>;
     case "party":
-      return <>Your twin wants to throw a <b style={{ color: "#ffd166" }}>party</b> in {t}&apos;s honour. Fund the fun?</>;
+      return <>Your twin wants to throw a <b style={{ color: C.amber }}>party</b> in {t}&apos;s honour. Fund the fun?</>;
     case "reconcile":
-      return <>Your twin wants to <b style={{ color: "#7fe0a8" }}>make peace</b> with {t}. Bury the hatchet?</>;
+      return <>Your twin wants to <b style={{ color: C.green }}>make peace</b> with {t}. Bury the hatchet?</>;
     default:
       return <>Your twin is planning something involving {t}.</>;
   }
 }
 
-const labelColor = (label: string) =>
-  label === "nemesis" || label === "rival" ? "#ff8a9c" : label === "acquaintance" ? "#8fa8d8" : "#7fe0a8";
-
-const mono: React.CSSProperties = { fontFamily: "monospace" };
-
 export default function Page() {
   const [state, setState] = useState<WorldState | null>(null);
   const [live, setLive] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [myTwinId, setMyTwinId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -69,9 +75,40 @@ export default function Page() {
   const [creating, setCreating] = useState(false);
   const [caption, setCaption] = useState<Caption | null>(null);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [chatEvent, setChatEvent] = useState<{ id: string; text: string } | null>(null);
+  // ---- selection + inspector ----
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TwinDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<{ id: string; n: number } | null>(null);
+  const autoSelected = useRef(false);
+  // ---- my twin's order progress (for the tracker) ----
+  const [arrivedKey, setArrivedKey] = useState("");
+  const arrivedKeyRef = useRef("");
+  const [talkingKey, setTalkingKey] = useState("");
+  const [issued, setIssued] = useState<{ key: string; at: number }>({ key: "", at: 0 });
+
   const playGen = useRef(0);
   const stateRef = useRef<WorldState | null>(null);
   stateRef.current = state;
+  /**
+   * Owner orders are LIVE state: episode playback replays older snapshots, so
+   * orders always come from the newest world we received, never from a replayed frame.
+   */
+  const liveOrders = useRef<Record<string, WorldTwinView["order"]>>({});
+  const ordersAsOf = useRef("");
+  const absorbOrders = (w: WorldState | undefined) => {
+    if (!w) return;
+    if (w.asOf) {
+      if (w.asOf < ordersAsOf.current) return; // read before newer news — stale
+      ordersAsOf.current = w.asOf;
+    }
+    for (const t of w.twins) liveOrders.current[t.id] = t.order;
+  };
+  const withLiveOrders = (w: WorldState): WorldState => ({
+    ...w,
+    twins: w.twins.map((t) => (t.id in liveOrders.current ? { ...t, order: liveOrders.current[t.id] } : t))
+  });
 
   const refreshPanel = useCallback(async () => {
     const uid = localStorage.getItem("aiv.userId");
@@ -84,6 +121,19 @@ export default function Page() {
     }
   }, []);
 
+  const loadDetail = useCallback(async (id: string, quiet = false) => {
+    if (!quiet) setDetailLoading(true);
+    try {
+      const viewer = localStorage.getItem("aiv.userId");
+      const r = await fetch(`${API}/api/twins/${encodeURIComponent(id)}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`);
+      if (r.ok) setDetail((await r.json()) as TwinDetail);
+    } catch {
+      /* inspector refresh is best-effort */
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setUserId(localStorage.getItem("aiv.userId"));
     setMyTwinId(localStorage.getItem("aiv.twinId"));
@@ -92,6 +142,25 @@ export default function Page() {
   useEffect(() => {
     if (userId) refreshPanel();
   }, [userId, refreshPanel]);
+
+  // The return moment: open on your own twin's card (its recent life).
+  useEffect(() => {
+    if (myTwinId && !autoSelected.current) {
+      autoSelected.current = true;
+      setSelectedId(myTwinId);
+    }
+  }, [myTwinId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    setDetail((d) => (d?.id === selectedId ? d : null));
+    void loadDetail(selectedId);
+    const h = setInterval(() => void loadDetail(selectedId, true), 15_000);
+    return () => clearInterval(h);
+  }, [selectedId, loadDetail]);
 
   /**
    * Episode playback: frames advance the world; every NEW spoken line plays
@@ -106,7 +175,7 @@ export default function Page() {
 
       for (const f of frames) {
         if (playGen.current !== gen) return;
-        setState(f);
+        setState(withLiveOrders(f));
         const fresh = f.twins.filter((t) => t.say && t.say !== prevSay[t.id]);
         for (const t of f.twins) prevSay[t.id] = t.say;
         if (fresh.length === 0) {
@@ -132,8 +201,12 @@ export default function Page() {
     const socket = io(API, { transports: ["websocket", "polling"] });
     socket.on("connect", () => setLive(true));
     socket.on("disconnect", () => setLive(false));
-    socket.on("world", (w: WorldState) => setState(w));
+    socket.on("world", (w: WorldState) => {
+      absorbOrders(w);
+      setState(withLiveOrders(w));
+    });
     socket.on("day", ({ frames }: { frames: WorldState[] }) => {
+      absorbOrders(frames[frames.length - 1]); // newest snapshot at the time it was sent
       void playEpisode(frames);
     });
     return () => {
@@ -142,14 +215,53 @@ export default function Page() {
     };
   }, [playEpisode]);
 
-  const liveADay = async () => {
-    setBusy(true);
-    try {
-      await fetch(`${API}/api/run-day`, { method: "POST" });
-    } finally {
-      setBusy(false);
+  // ---- my twin + its order ----
+  const myView = state?.twins.find((t) => t.id === myTwinId) ?? null;
+  const myOrder = myView?.order ?? null;
+  const myOrderKey = orderKeyOf(myOrder);
+  const myOrderRef = useRef(myOrder);
+  myOrderRef.current = myOrder;
+
+  useEffect(() => {
+    if (myOrderKey && issued.key !== myOrderKey) setIssued({ key: myOrderKey, at: Date.now() });
+    if (!myOrderKey) {
+      // order over: the same order given again later is a new trip
+      arrivedKeyRef.current = "";
+      setArrivedKey("");
+      setTalkingKey("");
+      if (issued.key) setIssued({ key: "", at: 0 });
     }
-  };
+  }, [myOrderKey, issued.key]);
+
+  // a caption line from my twin after it found its target = they're talking
+  useEffect(() => {
+    if (myOrder?.kind === "talk_to" && arrivedKey === myOrderKey && speakingId === myTwinId) setTalkingKey(myOrderKey);
+  }, [speakingId, myOrder, arrivedKey, myOrderKey, myTwinId]);
+
+  const onOrderArrive = useCallback(
+    (twinId: string, status: string) => {
+      if (twinId !== myTwinId) return;
+      const key = orderKeyOf(myOrderRef.current);
+      if (key === arrivedKeyRef.current) return; // a remounted scene re-reports the same arrival
+      arrivedKeyRef.current = key;
+      setChatEvent({ id: `arrive-${Date.now()}`, text: `✅ ${status}` });
+      setArrivedKey(key);
+      // "talk to X": the conversation starts the moment the twin gets there
+      if (myOrderRef.current?.kind === "talk_to" && userId) {
+        void fetch(`${API}/api/order/arrived`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId })
+        }).catch(() => { /* the server's fallback timer starts the talk */ });
+      }
+    },
+    [myTwinId, userId]
+  );
+
+  const select = useCallback((id: string | null, focus = false) => {
+    setSelectedId(id);
+    if (id && focus) setFocusRequest((f) => ({ id, n: (f?.n ?? 0) + 1 }));
+  }, []);
 
   const createTwin = async () => {
     if (!form.name.trim()) return;
@@ -181,165 +293,182 @@ export default function Page() {
     await refreshPanel();
   };
 
+  // ---- HUD data ----
+  const popularity = useMemo(() => new Map((panel?.leaderboard ?? []).map((r) => [r.twinId, r.popularity])), [panel]);
+
+  const villagers: VillagerRow[] = useMemo(
+    () =>
+      (state?.twins ?? [])
+        .map((t) => {
+          const isMine = t.id === myTwinId;
+          const arrived = isMine && arrivedKey === orderKeyOf(t.order);
+          const speaking = t.id === speakingId;
+          return {
+            id: t.id,
+            name: t.name,
+            colorHex: t.colorHex,
+            zoneLabel: ZONE_DISPLAY[zoneOfTile(t.col, t.row)] ?? "",
+            status: speaking ? "💬 Talking" : t.order ? orderStatus(t.order, arrived) : "Roaming",
+            tone: speaking ? ("blue" as const) : t.order ? ("amber" as const) : ("grey" as const),
+            isMine,
+            popularity: popularity.get(t.id)
+          };
+        })
+        .sort((a, b) => Number(b.isMine) - Number(a.isMine) || (b.popularity ?? 0) - (a.popularity ?? 0)),
+    [state, myTwinId, arrivedKey, speakingId, popularity]
+  );
+
+  const myRank = panel?.leaderboard ? panel.leaderboard.findIndex((r) => r.twinId === myTwinId) + 1 : 0;
+  const friends = (panel?.relationships ?? []).filter((r) => r.score > 0).length;
+  const rivals = (panel?.relationships ?? []).filter((r) => r.score < 0).length;
+  const pending = panel?.approvals.length ?? 0;
+  const stats = [
+    { key: "villagers", icon: "🏘️", label: "Villagers", value: String(state?.twins.length ?? "–"), sub: "living on the island" },
+    ...(userId
+      ? [
+          {
+            key: "rank", icon: "🏆", label: "Your rank", value: myRank > 0 ? `#${myRank}` : "–",
+            sub: `popularity ${popularity.get(myTwinId ?? "") ?? 0}`
+          },
+          { key: "friends", icon: "💛", label: "Friends", value: String(friends), sub: `${rivals} rival${rivals === 1 ? "" : "s"}` },
+          {
+            key: "needs", icon: "🔔", label: "Needs you", value: String(pending), sub: "decisions waiting",
+            ...(pending > 0 ? { delta: { text: "now", tone: "red" as const } } : {})
+          }
+        ]
+      : [])
+  ];
+
+  const inspectorOpen = selectedId !== null;
+
   return (
     <main>
-      <div style={{ position: "fixed", top: 18, left: 22, zIndex: 10, color: "#eaf0ff", fontSize: 18, opacity: 0.9, ...mono }}>
-        AiVillage <span style={{ color: live ? "#5be0c8" : "#7f93c4", fontSize: 11 }}>● {live ? "LIVE" : "…"}</span>
-      </div>
-
       {state ? (
-        <WorldCanvas state={state} myTwinId={myTwinId} speakingTwinId={speakingId} />
+        <VillageCanvas
+          state={state}
+          myTwinId={myTwinId}
+          speakingTwinId={speakingId}
+          selectedId={selectedId}
+          onSelect={(id) => select(id)}
+          onOrderArrive={onOrderArrive}
+          focusRequest={focusRequest}
+          controlsRight={inspectorOpen ? 16 + INSPECTOR_WIDTH + 12 : 16}
+        />
       ) : (
-        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#7f93c4", ...mono }}>
+        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: C.muted, fontSize: 14 }}>
           Connecting to the village…
         </div>
       )}
 
-      {/* ---- TV caption bar (reality-show subtitles) ---- */}
-      {caption && (
+      <TopBar
+        live={live}
+        items={(state?.twins ?? []).map((t) => ({ id: t.id, name: t.name, colorHex: t.colorHex, sub: ZONE_DISPLAY[zoneOfTile(t.col, t.row)] ?? "" }))}
+        onPick={(id) => select(id, true)}
+        me={myView ? { name: myView.name, colorHex: myView.colorHex } : null}
+      />
+
+      <StatCards stats={stats} style={{ top: 80 }} />
+
+      {/* ---- needs your decision (owner-gated big moves) ---- */}
+      {panel && panel.approvals.length > 0 && (
         <div
-          key={`${caption.twinId}:${caption.text}`}
           style={{
-            position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)",
-            zIndex: 11, width: "min(660px, 82vw)", boxSizing: "border-box",
-            background: "rgba(7,11,22,0.95)", border: "1px solid #24365c",
-            borderLeft: `3px solid ${caption.color}`, borderRadius: 10,
-            padding: "10px 16px 11px", boxShadow: "0 6px 24px rgba(0,0,0,0.5)", ...mono
+            position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: Z.card + 2,
+            width: "min(420px, calc(100vw - 32px))", display: "flex", flexDirection: "column", gap: 8
           }}
         >
-          <div style={{ color: caption.color, fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
-            ● {caption.name.toUpperCase()}
-          </div>
-          <div style={{ color: "#e6edf7", fontSize: 13, lineHeight: 1.45 }}>{caption.text}</div>
+          {panel.approvals.map((a) => (
+            <ApprovalCard key={a.id} text={approvalText(a)} onApprove={() => resolveApproval(a.id, true)} onDecline={() => resolveApproval(a.id, false)} />
+          ))}
         </div>
       )}
 
-      {/* ---- owner side panel ---- */}
+      {inspectorOpen && (
+        <Inspector
+          detail={
+            // the server can't know when my twin arrived — the live world does
+            detail && detail.id === myTwinId
+              ? { ...detail, orderStatus: myOrder ? orderStatus(myOrder, arrivedKey !== "" && arrivedKey === myOrderKey) : null }
+              : detail
+          }
+          loading={detailLoading && !detail}
+          isMine={detail?.isMine ?? selectedId === myTwinId}
+          onClose={() => select(null)}
+          onFocus={() => selectedId && select(selectedId, true)}
+          style={{ top: 80, width: INSPECTOR_WIDTH, maxHeight: "calc(100vh - 96px - 340px)", minHeight: 0 }}
+        />
+      )}
+
+      {/* ---- TALK: chat with your twin (v3 core loop) ---- */}
+      {userId && <TwinChat userId={userId} twinName={panel?.twin?.name ?? null} order={myOrder} event={chatEvent} />}
+
+      {/* ---- bottom centre: reality-show captions + my twin's order progress ---- */}
       <div
         style={{
-          position: "fixed", top: 16, right: 16, zIndex: 10, width: 300,
-          background: "rgba(7,11,22,0.92)", border: "1px solid #24365c", borderRadius: 10,
-          padding: 14, color: "#c3d2f0", fontSize: 12, lineHeight: 1.5, ...mono,
-          maxHeight: "calc(100vh - 40px)", overflowY: "auto"
+          position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: Z.card,
+          width: "min(540px, calc(100vw - 32px))", display: "flex", flexDirection: "column", gap: 10, pointerEvents: "none"
         }}
       >
-        {!userId ? (
-          <>
-            <div style={{ color: "#eaf0ff", fontSize: 14, marginBottom: 4 }}>Create your twin</div>
-            <div style={{ color: "#7f93c4", marginBottom: 10 }}>
-              It will live among the others — making friends, rivals and drama — and ask you before its big moves.
-            </div>
-            <input
-              placeholder="Name (e.g. Memo)"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              style={inputStyle}
+        <CaptionBar caption={caption} />
+        {myView && (
+          <div style={{ pointerEvents: "auto" }}>
+            <OrderTracker
+              twinName={myView.name}
+              order={myOrder}
+              arrived={arrivedKey !== "" && arrivedKey === myOrderKey}
+              talking={talkingKey !== "" && talkingKey === myOrderKey}
+              issuedAt={issued.key === myOrderKey ? issued.at : null}
             />
-            <input
-              placeholder="Personality (e.g. charming gossip)"
-              value={form.personality}
-              onChange={(e) => setForm({ ...form, personality: e.target.value })}
-              style={inputStyle}
-            />
-            <input
-              placeholder="Goal (e.g. become the most loved in the village)"
-              value={form.goal}
-              onChange={(e) => setForm({ ...form, goal: e.target.value })}
-              style={inputStyle}
-            />
-            <button onClick={createTwin} disabled={creating || !form.name.trim()} style={{ ...btnStyle, width: "100%", marginTop: 4 }}>
-              {creating ? "creating…" : "✨ Enter the village"}
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ color: "#eaf0ff", fontSize: 14 }}>
-                {panel?.twin ? `🧍 ${panel.twin.name}` : "Your twin"}
-              </div>
-              <button onClick={liveADay} disabled={busy} style={btnStyle}>
-                {busy ? "living…" : "▶ Live a day"}
-              </button>
-            </div>
-
-            {panel?.twin && (
-              <div style={{ color: "#7f93c4", marginBottom: 10 }}>
-                {panel.twin.goals[0] ? `goal: ${panel.twin.goals[0]}` : ""}
-                {" · "}rep {panel.twin.reputation}
-              </div>
-            )}
-
-            {panel && panel.approvals.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ color: "#ffd166", marginBottom: 6 }}>Needs your decision</div>
-                {panel.approvals.map((a) => (
-                  <div key={a.id} style={{ background: "#101a30", border: "1px solid #3a5a9a", borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                    <div style={{ marginBottom: 8 }}>{approvalText(a)}</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => resolveApproval(a.id, true)} style={{ ...btnStyle, background: "#143c26", borderColor: "#2e7d4f", color: "#7fe0a8" }}>
-                        ✓ Approve
-                      </button>
-                      <button onClick={() => resolveApproval(a.id, false)} style={{ ...btnStyle, background: "#3c1420", borderColor: "#7d2e42", color: "#ff8a9c" }}>
-                        ✕ Decline
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {panel && (panel.leaderboard?.length ?? 0) > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ color: "#7f93c4", marginBottom: 6 }}>🏆 Village standings</div>
-                {panel.leaderboard!.map((row, i) => {
-                  const mine = row.twinId === myTwinId;
-                  return (
-                    <div key={row.twinId} style={{ display: "flex", justifyContent: "space-between", padding: "2px 6px", borderRadius: 4, background: mine ? "#16314f" : "transparent", color: mine ? "#9fd9ff" : "#a9bce0" }}>
-                      <span>{i + 1}. {row.name}{mine ? " ← you" : ""}</span>
-                      <span style={{ color: row.popularity < 0 ? "#ff8a9c" : "#7fe0a8" }}>{row.popularity}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {panel && (panel.relationships?.length ?? 0) > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ color: "#7f93c4", marginBottom: 6 }}>Friends &amp; rivals</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {panel.relationships!.map((r) => (
-                    <span key={r.name} style={{ border: `1px solid ${labelColor(r.label)}`, color: labelColor(r.label), borderRadius: 12, padding: "2px 8px", fontSize: 11 }}>
-                      {r.name} · {r.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ color: "#7f93c4", marginBottom: 6 }}>While you were away</div>
-            {panel && panel.memories.length > 0 ? (
-              panel.memories.map((m) => (
-                <div key={m.id} style={{ borderLeft: "2px solid #24365c", paddingLeft: 8, marginBottom: 6, color: "#a9bce0" }}>
-                  {m.content}
-                </div>
-              ))
-            ) : (
-              <div style={{ color: "#5e729c" }}>Nothing yet — press “Live a day”.</div>
-            )}
-          </>
+          </div>
         )}
       </div>
+
+      <VillagerList villagers={villagers} selectedId={selectedId} onSelect={(id) => select(id, true)} />
+
+      {/* ---- onboarding ---- */}
+      {!userId && (
+        <div
+          style={{
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: Z.overlay,
+            width: "min(380px, calc(100vw - 32px))", padding: 22, ...card
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Create your twin</div>
+          <div style={{ color: C.muted, fontSize: 13.5, lineHeight: 1.5, marginBottom: 16 }}>
+            It will live among the others — making friends, rivals and drama. Talk to it, send it places, and it asks you before its big moves.
+          </div>
+          <input placeholder="Name (e.g. Memo)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+          <input
+            placeholder="Personality (e.g. charming gossip)"
+            value={form.personality}
+            onChange={(e) => setForm({ ...form, personality: e.target.value })}
+            style={inputStyle}
+          />
+          <input
+            placeholder="Goal (e.g. become the most loved in the village)"
+            value={form.goal}
+            onChange={(e) => setForm({ ...form, goal: e.target.value })}
+            style={inputStyle}
+          />
+          <button
+            onClick={createTwin}
+            disabled={creating || !form.name.trim()}
+            style={{
+              width: "100%", height: 42, marginTop: 4, border: "none", borderRadius: 10, background: C.blue, color: "#fff",
+              fontSize: 14, fontWeight: 600, cursor: creating || !form.name.trim() ? "default" : "pointer",
+              opacity: creating || !form.name.trim() ? 0.55 : 1
+            }}
+          >
+            {creating ? "Creating…" : "✨ Enter the village"}
+          </button>
+        </div>
+      )}
     </main>
   );
 }
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box", marginBottom: 8, padding: "8px 10px",
-  background: "#0c1526", border: "1px solid #24365c", borderRadius: 6,
-  color: "#eaf0ff", fontFamily: "monospace", fontSize: 12, outline: "none"
-};
-
-const btnStyle: React.CSSProperties = {
-  background: "#16314f", color: "#9fd9ff", border: "1px solid #2f63a0",
-  borderRadius: 7, padding: "6px 12px", fontFamily: "monospace", fontSize: 12, cursor: "pointer"
+  width: "100%", height: 40, marginBottom: 10, padding: "0 12px",
+  background: "#f6f8fc", border: `1px solid ${C.line}`, borderRadius: 10,
+  color: C.text, fontSize: 13.5, outline: "none"
 };
