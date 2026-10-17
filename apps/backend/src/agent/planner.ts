@@ -1,4 +1,6 @@
-import type { Twin, BeatResult, Verb, SocialMove, LlmClient, Memory } from "@aivillage/shared";
+import { ACTIONS, type Twin, type BeatResult, type Verb, type SocialMove, type LlmClient, type Memory } from "@aivillage/shared";
+
+const ACTION_LIST = ACTIONS.map((a) => (a.target ? `${a.id} (with someone)` : a.id)).join(", ");
 
 export interface PlanContext {
   nearbyTwinNames: string[];
@@ -34,19 +36,22 @@ export function buildPrompt(twin: Twin, ctx: PlanContext): string {
     `- "bond": a kind gesture toward someone — help, gift, invite (target = name)`,
     `- "scheme": advance your social goal quietly (target = null)`,
     `- "move": go to another zone (target = zone name)`,
+    `- "act": do something real with your body — action = one of: ${ACTION_LIST}; or a short everyday action of your own (e.g. "play guitar") with an emoji. target = a villager's name for "(with someone)" actions, else null. Touching needs a friendly relationship.`,
     `- "bigmove": a BIG dramatic step — kind must be one of "confront" (a rival), "confess" (declare someone your closest friend), "party" (throw one, target = guest of honour), "reconcile" (make peace). Your owner must approve it first, so use it when it truly matters.`,
     `Stay in character, react to how you feel about people, do NOT repeat what you just did.`,
-    `Respond ONLY with strict JSON: {"verb":"chat|bond|scheme|move|bigmove","target":<name-or-zone-or-null>,"kind":<confront|confess|party|reconcile|null>,"narrative":"<one vivid third-person sentence>"}`
+    `Respond ONLY with strict JSON: {"verb":"chat|bond|scheme|move|act|bigmove","target":<name-or-zone-or-null>,"kind":<confront|confess|party|reconcile|null>,"action":<action-or-null>,"emoji":<emoji-or-null>,"narrative":"<one vivid third-person sentence>"}`
   ].join("\n");
 }
 
-const VALID_VERBS: Verb[] = ["work", "socialize", "move", "chat", "bond", "scheme", "bigmove"];
+const VALID_VERBS: Verb[] = ["work", "socialize", "move", "chat", "bond", "scheme", "bigmove", "act"];
 const VALID_MOVES: SocialMove[] = ["confront", "confess", "party", "reconcile"];
 
 export function parseBeat(raw: string): BeatResult {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("no JSON object found in LLM response");
-  const obj = JSON.parse(match[0]) as { verb?: string; target?: string | null; kind?: string | null; narrative?: string };
+  const obj = JSON.parse(match[0]) as {
+    verb?: string; target?: string | null; kind?: string | null; action?: string | null; emoji?: string | null; narrative?: string;
+  };
   if (!obj.verb || !VALID_VERBS.includes(obj.verb as Verb)) {
     throw new Error(`invalid verb: ${String(obj.verb)}`);
   }
@@ -56,6 +61,15 @@ export function parseBeat(raw: string): BeatResult {
       throw new Error(`invalid bigmove kind: ${String(obj.kind)}`);
     }
     kind = obj.kind as SocialMove;
+  }
+  if (obj.verb === "act") {
+    const action = typeof obj.action === "string" ? obj.action.trim().slice(0, 40) : "";
+    if (!action) throw new Error("act without an action");
+    return {
+      verb: "act", target: obj.target ?? null, kind: null, action,
+      emoji: typeof obj.emoji === "string" && obj.emoji.trim() ? obj.emoji.trim().slice(0, 8) : null,
+      narrative: String(obj.narrative ?? "")
+    };
   }
   return { verb: obj.verb as Verb, target: obj.target ?? null, kind, narrative: String(obj.narrative ?? "") };
 }

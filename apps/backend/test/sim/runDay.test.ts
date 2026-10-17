@@ -12,6 +12,7 @@ import { runDay } from "../../src/sim/runDay.js";
 import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
+import { ACT_HOLD_MS } from "@aivillage/shared";
 
 // ─── zone centres (from DEFAULT_ZONES in world.ts) ───────────────────────────
 const PLAZA       = { col: 3, row: 3 };
@@ -296,6 +297,65 @@ describe("runDay venue routing", () => {
       const saved = await new DrizzleTwinRepository(tdb.db).getById(mineId);
       expect(saved?.locationZone).toBe("event_space");
       expect(saved?.order?.zone).toBe("event_space"); // the order survives the beat
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+});
+
+// ─── v4: the AI picks real actions for villagers ─────────────────────────────
+describe("runDay: autonomous actions", () => {
+  const mkAct = (actor: string, action: string, target: string | null = null) =>
+    JSON.stringify({ verb: "act", target, kind: null, action, narrative: `${actor} does ${action}.` });
+
+  it("a solo action becomes a short automatic action at its venue", async () => {
+    const { tdb, idA } = await makeDb(["ActA", "ActB"]);
+    try {
+      const llm = new CannedLlmClient([mkAct("ActA", "drink_coffee")]);
+      const before = Date.now();
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [idA], db: tdb.db });
+      const view = frames[0].twins.find((t) => t.name === "ActA")!;
+      expect(view.order).toMatchObject({ kind: "act", auto: true, zone: "maker_space", action: { id: "drink_coffee", anim: "drink" } });
+      const saved = await new DrizzleTwinRepository(tdb.db).getById(idA);
+      expect(saved?.locationZone).toBe("maker_space");
+      const hold = Date.parse(saved!.order!.holdUntil) - before;
+      expect(hold).toBeGreaterThan(30_000);
+      expect(hold).toBeLessThanOrEqual(ACT_HOLD_MS + 5_000);
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("a social action goes to the partner; a friendly hug is accepted", async () => {
+    const { tdb, idA } = await makeDb(["HugA", "HugB"]);
+    try {
+      const llm = new CannedLlmClient([mkAct("HugA", "hug", "HugB")]);
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [idA], db: tdb.db });
+      const view = frames[0].twins.find((t) => t.name === "HugA")!;
+      expect(view.order).toMatchObject({ kind: "act", targetName: "HugB", action: { id: "hug", refused: false } });
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("touch without enough friendship is refused (cheek kiss from a stranger)", async () => {
+    const { tdb, idA } = await makeDb(["KissA", "KissB"]);
+    try {
+      const llm = new CannedLlmClient([mkAct("KissA", "kiss_cheek", "KissB")]);
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [idA], db: tdb.db });
+      const view = frames[0].twins.find((t) => t.name === "KissA")!;
+      expect(view.order?.action).toMatchObject({ id: "kiss_cheek", refused: true });
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("an unsafe action is never performed", async () => {
+    const { tdb, idA } = await makeDb(["BadA", "BadB"]);
+    try {
+      const llm = new CannedLlmClient([mkAct("BadA", "punch", "BadB")]);
+      const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [idA], db: tdb.db });
+      expect(frames[0].twins.find((t) => t.name === "BadA")!.order).toBeNull();
     } finally {
       await tdb.stop();
     }

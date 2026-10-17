@@ -1,4 +1,5 @@
-import type { Twin, Structure, ProjectType } from "./types.js";
+import type { Twin, Structure, ProjectType, TwinPose } from "./types.js";
+import { validateAppearance, type Appearance } from "./appearance.js";
 import { isOrderActive, type OwnerOrder } from "./orders.js";
 
 // --- Render-oriented world state (what the PixiJS renderer consumes) ---
@@ -17,7 +18,12 @@ export interface WorldTwinView {
   say: string | null;
   flag: string | null;
   /** active owner order, if any — the renderer walks the twin there and holds it */
-  order: Pick<OwnerOrder, "kind" | "zone" | "targetName" | "label"> | null;
+  order: (Pick<OwnerOrder, "kind" | "zone" | "targetName" | "label"> & { action?: OwnerOrder["action"]; issuedAt?: string; auto?: boolean }) | null;
+  appearance: Appearance;
+  /** the player's own twin */
+  isMain: boolean;
+  /** saved exact spot, if any (the renderer starts the twin there) */
+  pose: TwinPose | null;
 }
 
 export interface WorldStructureView {
@@ -127,7 +133,7 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
   const countByZone: Record<string, number> = {};
   const now = input.now ?? new Date();
 
-  const twins: WorldTwinView[] = input.twins.map((t) => {
+  const twins: WorldTwinView[] = input.twins.filter((t) => t.active !== false).map((t) => {
     const override = input.positionsByTwinId?.[t.id];
     let col: number;
     let row: number;
@@ -151,8 +157,11 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
       say: input.saysByTwinId?.[t.id] ?? null,
       flag: input.flagByTwinId?.[t.id] ?? null,
       order: t.order && isOrderActive(t.order, now)
-        ? { kind: t.order.kind, zone: t.order.zone, targetName: t.order.targetName, label: t.order.label }
-        : null
+        ? { kind: t.order.kind, zone: t.order.zone, targetName: t.order.targetName, label: t.order.label, action: t.order.action ?? null, issuedAt: t.order.issuedAt, ...(t.order.auto ? { auto: true } : {}) }
+        : null,
+      appearance: validateAppearance(t.appearance),
+      isMain: t.role === "main",
+      pose: t.pose ?? null
     };
   });
 
@@ -183,6 +192,11 @@ export function orderStatus(order: NonNullable<WorldTwinView["order"]>, arrived:
   if (order.kind === "stay") return `📍 ${order.label}`;
   if (!arrived) return `🚶 ${order.label}`;
   if (order.kind === "talk_to") return `💬 Talking with ${order.targetName}`;
+  if (order.kind === "act" && order.action) {
+    const act = order.action;
+    if (act.refused) return `🙅 ${act.targetName} said no to ${/^[aeiou]/i.test(act.label) ? "an" : "a"} ${act.label}`;
+    return `${act.emoji} ${act.label}${act.targetName ? ` ${act.targetName}` : ""}`;
+  }
   return `${ZONE_EMOJI[order.zone] ?? "📍"} At ${ZONE_DISPLAY[order.zone] ?? order.zone}`;
 }
 

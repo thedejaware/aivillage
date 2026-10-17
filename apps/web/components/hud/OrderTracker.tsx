@@ -7,13 +7,15 @@
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { PerformedAction } from "@aivillage/shared";
 import { C, FONT, card, caps } from "./theme";
 
 export interface TrackedOrder {
-  kind: "go" | "talk_to" | "stay";
+  kind: "go" | "talk_to" | "stay" | "act";
   label: string;
   zone: string;
   targetName: string | null;
+  action?: PerformedAction | null;
 }
 
 interface Step { icon: string; label: string }
@@ -37,6 +39,15 @@ function stepsFor(order: TrackedOrder): Step[] {
       { icon: "🚶", label: "Walking" },
       { icon: "👀", label: `Found ${order.targetName ?? "them"}` },
       { icon: "💬", label: "Talking" }
+    ];
+  }
+  if (order.kind === "act" && order.action) {
+    const a = order.action;
+    return [
+      { icon: "📋", label: "Order given" },
+      { icon: "🚶", label: "Walking" },
+      { icon: a.targetName ? "👀" : "📍", label: a.targetName ? `Found ${a.targetName}` : "Arrived" },
+      a.refused ? { icon: "🙅", label: `${a.targetName ?? "They"} said no` } : { icon: a.emoji, label: a.label }
     ];
   }
   return [

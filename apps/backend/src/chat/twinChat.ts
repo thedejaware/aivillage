@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, labelFor } from "@aivillage/shared";
-import type { Twin, Memory, LlmClient, LlmTool, ToolTurn, TwinCommand, OwnerOrder } from "@aivillage/shared";
+import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, ACTIONS, labelFor } from "@aivillage/shared";
+import type { Twin, Memory, LlmClient, LlmTool, ToolTurn, TwinCommand, OwnerOrder, PerformedAction } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
 import { getDb } from "../db/appDb.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
@@ -107,11 +107,31 @@ export function buildChatTools(villagerNames: string[]): LlmTool[] {
     },
     {
       name: "talk_to",
-      description: "Walk over to a villager and start a conversation with them. Use when the owner asks you to talk to, find or visit someone.",
+      description: "Walk over to a villager and talk with them. Use when the owner asks you to talk to, find or visit someone, or to pass a message on (\"tell Mom dinner is ready\").",
       input_schema: {
         type: "object",
-        properties: { name: { type: "string", enum: villagerNames, description: "the villager's name" } },
+        properties: {
+          name: { type: "string", enum: villagerNames, description: "the villager's name" },
+          message: { type: "string", description: "optional: what the owner wants you to tell them" }
+        },
         required: ["name"]
+      }
+    },
+    {
+      name: "do_action",
+      description:
+        `Do something with your body, right now. Known actions: ${ACTIONS.map((a) => a.id).join(", ")}. ` +
+        "Social ones (hug, kiss_cheek, high_five, handshake, dance_together) need a target villager, who may refuse if they don't like you. " +
+        "For anything else a person can really do (e.g. 'play guitar'), pass a short action text and an emoji — it will be mimed. " +
+        "Never: violence, anything sexual (kisses are on the cheek only), flying, teleporting or leaving the village.",
+      input_schema: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "an action id from the list, or a short free action" },
+          target: { type: "string", enum: villagerNames, description: "the villager to do it with (social actions)" },
+          emoji: { type: "string", description: "one emoji for a free action" }
+        },
+        required: ["action"]
       }
     },
     {
@@ -142,6 +162,10 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? 
 /** Read one tool-use turn into a chat reply. Unknown places/people are dropped. */
 export function parseToolTurn(turn: ToolTurn, villagerNames: string[]): ChatReply {
   const out: ChatReply = { reply: turn.text.trim(), facts: [], goal: null, command: null };
+  const villager = (v: unknown): string | null => {
+    const wanted = (str(v) ?? "").toLowerCase();
+    return villagerNames.find((n) => n.toLowerCase() === wanted) ?? null;
+  };
   for (const call of turn.toolCalls) {
     switch (call.name) {
       case "go_to": {
@@ -150,9 +174,15 @@ export function parseToolTurn(turn: ToolTurn, villagerNames: string[]): ChatRepl
         break;
       }
       case "talk_to": {
-        const wanted = (str(call.input.name) ?? "").toLowerCase();
-        const name = villagerNames.find((n) => n.toLowerCase() === wanted);
-        if (name) out.command = { type: "talk_to", targetName: name };
+        const name = villager(call.input.name);
+        const message = str(call.input.message);
+        if (name) out.command = message ? { type: "talk_to", targetName: name, message } : { type: "talk_to", targetName: name };
+        break;
+      }
+      case "do_action": {
+        const action = str(call.input.action);
+        const emoji = str(call.input.emoji);
+        if (action) out.command = { type: "act", action, target: villager(call.input.target), ...(emoji ? { emoji } : {}) };
         break;
       }
       case "stay_here":
@@ -229,7 +259,8 @@ export interface ChatResult extends ChatReply {
 export async function chatWithTwin(
   userId: string,
   message: string,
-  llm: LlmClient,
+  /** the player's AI; null = none set up yet (simple orders still work) */
+  llm: LlmClient | null,
   dbOverride?: DB,
   now: () => Date = () => new Date()
 ): Promise<ChatResult> {
@@ -248,10 +279,11 @@ export async function chatWithTwin(
   const others = all.filter((t) => t.id !== twin.id);
   const villagerNames = others.map((t) => t.name);
 
+  const relRepo = new DrizzleRelationshipRepository(db);
   const [history, memories, myRels] = await Promise.all([
     chatRepo.recent(twin.id, HISTORY_TURNS),
     memRepo.recent(twin.id, 12),
-    new DrizzleRelationshipRepository(db).listFrom(twin.id)
+    relRepo.listFrom(twin.id)
   ]);
   const feelingByTwinId = new Map(myRels.filter((r) => r.score !== 0).map((r) => [r.toTwinId, labelFor(r.score) as string]));
   const ctx: ChatContext = {
@@ -262,21 +294,60 @@ export async function chatWithTwin(
     myZone: twin.locationZone
   };
 
-  let parsed: ChatReply;
-  try {
-    parsed = llm.generateWithTools
-      ? parseToolTurn(await llm.generateWithTools(buildChatToolPrompt(twin, ctx, text), buildChatTools(villagerNames)), villagerNames)
-      : parseChatReply(await llm.generate(buildChatPrompt(twin, ctx, text)));
-  } catch (e) {
-    console.error("twin chat LLM call failed:", e);
-    parsed = { reply: "", facts: [], goal: null, command: null };
+  let parsed: ChatReply = { reply: "", facts: [], goal: null, command: null };
+  if (llm) {
+    try {
+      parsed = llm.generateWithTools
+        ? parseToolTurn(await llm.generateWithTools(buildChatToolPrompt(twin, ctx, text), buildChatTools(villagerNames)), villagerNames)
+        : parseChatReply(await llm.generate(buildChatPrompt(twin, ctx, text)));
+    } catch (e) {
+      console.error("twin chat LLM call failed:", e);
+    }
   }
 
   // Safety net: if the owner clearly gave an order but the model forgot to act, act anyway.
   const command = parsed.command ?? parseCommand(text, villagerNames);
-  const reply =
-    parsed.reply ||
-    (command ? commandAck(twin.name, command) : `${twin.name} looks up, distracted by village drama — say that again?`);
+
+  let updated = twin;
+  if (parsed.goal) {
+    updated = { ...updated, goals: [parsed.goal, ...updated.goals.filter((g) => g !== parsed.goal)].slice(0, MAX_GOALS) };
+  }
+
+  // ---- execute the command: the twin ACTUALLY does what it was told ----
+  let worldChanged = false;
+  let targetTwinId: string | null = null;
+  let refusal: string | undefined;
+  if (command) {
+    // touch needs consent: how does each villager feel about this twin?
+    const feelingTowardMe = new Map((await relRepo.listAll()).filter((r) => r.toTwinId === twin.id).map((r) => [r.fromTwinId, r.score]));
+    const applied = applyCommand(updated, command, all, now(), (id) => feelingTowardMe.get(id) ?? 0);
+    refusal = applied.refusal;
+    if (applied.changed) {
+      updated = applied.twin;
+      targetTwinId = applied.target?.id ?? null;
+      worldChanged = true;
+      const order = updated.order;
+      if (order) {
+        await memRepo.append({
+          id: randomUUID(), twinId: twin.id, kind: "order",
+          content: `${twin.name}: ${order.label.toLowerCase()} — the owner asked.`,
+          importance: 1, createdAt: now().toISOString()
+        });
+      }
+      if (order?.kind === "act" && order.action && applied.target) {
+        await recordSocialAction(twin, applied.target, order.action, relRepo, memRepo, now());
+      }
+    }
+  }
+
+  const reply = refusal
+    ? `Hmm… ${refusal}.`
+    : parsed.reply ||
+      (command
+        ? commandAck(twin.name, command)
+        : llm
+          ? `${twin.name} looks up, distracted by village drama — say that again?`
+          : "I need an AI brain to really talk — choose one in ⚙️ Settings. I can still follow simple orders like “go to the café”.");
 
   await chatRepo.append(twin.id, "owner", text);
   await chatRepo.append(twin.id, "twin", reply);
@@ -292,32 +363,6 @@ export async function chatWithTwin(
     });
   }
 
-  let updated = twin;
-  if (parsed.goal) {
-    updated = { ...updated, goals: [parsed.goal, ...updated.goals.filter((g) => g !== parsed.goal)].slice(0, MAX_GOALS) };
-  }
-
-  // ---- execute the command: the twin ACTUALLY does what it was told ----
-  let worldChanged = false;
-  let targetTwinId: string | null = null;
-  if (command) {
-    const applied = applyCommand(updated, command, all, now());
-    if (applied.changed) {
-      updated = applied.twin;
-      targetTwinId = applied.target?.id ?? null;
-      worldChanged = true;
-      if (updated.order) {
-        await memRepo.append({
-          id: randomUUID(),
-          twinId: twin.id,
-          kind: "order",
-          content: `${twin.name}: ${updated.order.label.toLowerCase()} — the owner asked.`,
-          importance: 1,
-          createdAt: now().toISOString()
-        });
-      }
-    }
-  }
   if (updated !== twin) await twinRepo.save(updated);
 
   return {
@@ -331,6 +376,29 @@ export async function chatWithTwin(
     targetTwinId,
     worldChanged
   };
+}
+
+/** Touch changes feelings: an accepted hug brings two twins closer, a refusal stings. Both remember it. */
+async function recordSocialAction(
+  actor: Twin,
+  target: Twin,
+  action: PerformedAction,
+  relRepo: DrizzleRelationshipRepository,
+  memRepo: DrizzleMemoryRepository,
+  at: Date
+): Promise<void> {
+  const line = action.refused
+    ? `${actor.name} tried to ${action.label} ${target.name}, but ${target.name} said no.`
+    : `${actor.name} and ${target.name} shared a ${action.label}.`;
+  if (action.refused) {
+    await relRepo.applyDelta(actor.id, target.id, -3);
+  } else {
+    await relRepo.applyDelta(actor.id, target.id, 3);
+    await relRepo.applyDelta(target.id, actor.id, 4);
+  }
+  for (const twinId of [actor.id, target.id]) {
+    await memRepo.append({ id: randomUUID(), twinId, kind: "act", content: line, importance: 2, createdAt: at.toISOString() });
+  }
 }
 
 /** "Let it roam": clear the owner order. Returns false when there was nothing to clear. */

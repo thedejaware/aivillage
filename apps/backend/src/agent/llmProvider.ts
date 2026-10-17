@@ -13,7 +13,7 @@ const DEFAULT_CANNED = JSON.stringify({ verb: "work", target: null, narrative: "
 export function chooseLlm(): LlmClient {
   const provider = process.env.LLM_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? "anthropic" : "canned");
   if (provider === "anthropic") {
-    return new AnthropicLlmClient(process.env.LLM_MODEL ?? "claude-haiku-4-5");
+    return new AnthropicLlmClient(process.env.LLM_MODEL ?? "claude-haiku-5-5");
   }
   return new CannedLlmClient([DEFAULT_CANNED]);
 }

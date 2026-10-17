@@ -73,3 +73,26 @@ describe("planBeat", () => {
     expect(r).toEqual({ verb: "socialize", target: "Lena", kind: null, narrative: "Say hi." });
   });
 });
+
+describe("v4: the planner can choose an action", () => {
+  it("offers 'act' with the action catalogue", () => {
+    const p = buildPrompt(twin(), { nearbyTwinNames: ["Lena"], recentMemories: [] });
+    expect(p).toContain('"act"');
+    expect(p).toContain("wash_hands");
+    expect(p).toContain("hug");
+  });
+
+  it("parses a solo action", () => {
+    const r = parseBeat('{"verb":"act","target":null,"action":"drink_coffee","narrative":"Grabs a coffee."}');
+    expect(r).toEqual({ verb: "act", target: null, kind: null, action: "drink_coffee", emoji: null, narrative: "Grabs a coffee." });
+  });
+
+  it("parses a social action with a partner and a free action with an emoji", () => {
+    expect(parseBeat('{"verb":"act","target":"Lena","action":"hug","narrative":"x"}')).toMatchObject({ action: "hug", target: "Lena" });
+    expect(parseBeat('{"verb":"act","target":null,"action":"play guitar","emoji":"🎸","narrative":"x"}')).toMatchObject({ action: "play guitar", emoji: "🎸" });
+  });
+
+  it("throws on an act with no action", () => {
+    expect(() => parseBeat('{"verb":"act","target":null,"narrative":"x"}')).toThrow();
+  });
+});

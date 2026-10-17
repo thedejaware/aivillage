@@ -140,7 +140,7 @@ describe("buildChatTools", () => {
   const byName = new Map(tools.map((t) => [t.name, t]));
 
   it("offers every action the twin can take", () => {
-    expect([...byName.keys()].sort()).toEqual(["be_free", "go_to", "remember_fact", "set_goal", "stay_here", "talk_to"]);
+    expect([...byName.keys()].sort()).toEqual(["be_free", "do_action", "go_to", "remember_fact", "set_goal", "stay_here", "talk_to"]);
   });
   it("go_to only accepts real venues", () => {
     const place = (byName.get("go_to")!.input_schema as unknown as { properties: { place: { enum: string[] } } }).properties.place;
@@ -185,5 +185,27 @@ describe("parseToolTurn", () => {
   it("caps facts at 3", () => {
     const calls = ["a", "b", "c", "d"].map((f) => ({ name: "remember_fact", input: { fact: f } }));
     expect(parseToolTurn({ text: "ok", toolCalls: calls }, villagers).facts).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("do_action / talk_to message", () => {
+  const villagers = ["Ravi", "Aiko"];
+  it("do_action lists the catalogue and accepts free actions", () => {
+    const tool = buildChatTools(villagers).find((t) => t.name === "do_action")!;
+    expect(tool.description).toContain("wash_hands");
+    expect(tool.description).toContain("hug");
+    expect(tool.input_schema.required).toEqual(["action"]);
+  });
+  it("maps do_action into an act command", () => {
+    const out = parseToolTurn({ text: "Coming!", toolCalls: [{ name: "do_action", input: { action: "hug", target: "ravi" } }] }, villagers);
+    expect(out.command).toEqual({ type: "act", action: "hug", target: "Ravi" });
+  });
+  it("keeps a mime's own label and emoji", () => {
+    const out = parseToolTurn({ text: "", toolCalls: [{ name: "do_action", input: { action: "play guitar", emoji: "🎸" } }] }, villagers);
+    expect(out.command).toEqual({ type: "act", action: "play guitar", target: null, emoji: "🎸" });
+  });
+  it("talk_to can carry a message to pass on", () => {
+    const out = parseToolTurn({ text: "", toolCalls: [{ name: "talk_to", input: { name: "Aiko", message: "dinner is ready" } }] }, villagers);
+    expect(out.command).toEqual({ type: "talk_to", targetName: "Aiko", message: "dinner is ready" });
   });
 });

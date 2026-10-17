@@ -14,10 +14,13 @@ type OrbitControlsImpl = React.ElementRef<typeof OrbitControls>;
 import type { WorldState } from "@aivillage/shared";
 import { VillageSim } from "../../lib/village/sim";
 import { daynessAt } from "../../lib/village/clock";
+import { targetFps } from "../../lib/village/frameBudget";
 import { VillageWorld, VillageLighting } from "./World";
 import { TwinAvatar } from "./Twins";
 
 const HOME_POS = new THREE.Vector3(11, 10.5, 11);
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const POSE_SAVE_MS = 15_000;
 const HOME_TARGET = new THREE.Vector3(0, 0, 0);
 
 export interface CameraApi {
@@ -87,6 +90,44 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
   );
 }
 
+/**
+ * Drives redraws on demand: 30 fps while idle, 60 fps while the user moves the
+ * camera, nothing while the tab is hidden (see frameBudget).
+ */
+function FrameLimiter() {
+  const { invalidate, gl } = useThree();
+  useEffect(() => {
+    let lastInteraction = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      const fps = targetFps({ hidden: document.hidden, now: performance.now(), lastInteraction });
+      if (fps === 0) return; // resumed by visibilitychange
+      invalidate();
+      timer = setTimeout(tick, 1000 / fps);
+    };
+    const touch = () => { lastInteraction = performance.now(); };
+    const drag = (e: PointerEvent) => { if (e.buttons) touch(); }; // hovering alone stays at idle fps
+    const onVisible = () => {
+      clearTimeout(timer);
+      if (!document.hidden) tick();
+    };
+    const el = gl.domElement;
+    el.addEventListener("pointerdown", touch);
+    el.addEventListener("pointermove", drag);
+    el.addEventListener("wheel", touch, { passive: true });
+    document.addEventListener("visibilitychange", onVisible);
+    tick();
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener("pointerdown", touch);
+      el.removeEventListener("pointermove", drag);
+      el.removeEventListener("wheel", touch);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [invalidate, gl]);
+  return null;
+}
+
 /** Advances the simulation once per frame. */
 function SimDriver({ sim }: { sim: VillageSim }) {
   useFrame((_, delta) => sim.step(performance.now() / 1000, Math.min(0.1, Math.max(0.001, delta))));
@@ -129,6 +170,27 @@ export default function VillageCanvas({
     sim.speakingId = speakingTwinId;
   }, [sim, speakingTwinId]);
 
+  // remember where everyone stands, so the village reopens exactly here
+  useEffect(() => {
+    const body = () => JSON.stringify({ poses: sim.poses().map((p) => ({ ...p, x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(3) })) });
+    const save = () => {
+      if (sim.twins.size === 0) return;
+      void fetch(`${API}/api/poses`, { method: "PUT", headers: { "content-type": "application/json" }, body: body() }).catch(() => {});
+    };
+    // text/plain beacon: no CORS preflight, still delivered while the tab closes
+    const beacon = () => { if (sim.twins.size > 0) navigator.sendBeacon?.(`${API}/api/poses`, new Blob([body()], { type: "text/plain" })); };
+    const onVisibility = () => { if (document.hidden) beacon(); };
+    const h = setInterval(() => { if (!document.hidden) save(); }, POSE_SAVE_MS);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", beacon);
+    return () => {
+      clearInterval(h);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", beacon);
+      save();
+    };
+  }, [sim]);
+
   // the sky changes slowly — re-render the world twice a second, not every frame
   useEffect(() => {
     const h = setInterval(() => setDayness(daynessAt(Date.now())), 500);
@@ -146,7 +208,8 @@ export default function VillageCanvas({
       <div style={{ position: "fixed", inset: 0 }}>
         <Canvas
           shadows={{ type: THREE.PCFSoftShadowMap }}
-          dpr={[1, 2]}
+          frameloop="demand"
+          dpr={[1, 1.5]}
           camera={{ position: HOME_POS.toArray(), fov: 32, near: 0.1, far: 300 }}
           gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
           onPointerMissed={() => onSelect(null)}
@@ -158,12 +221,14 @@ export default function VillageCanvas({
               key={t.id}
               id={t.id}
               sim={sim}
+              appearance={t.appearance}
               isMine={t.id === myTwinId}
               selected={t.id === selectedId}
               onSelect={onSelect}
             />
           ))}
           <SimDriver sim={sim} />
+          <FrameLimiter />
           <CameraRig api={cameraApi} />
         </Canvas>
       </div>

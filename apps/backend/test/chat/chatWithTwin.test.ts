@@ -106,3 +106,46 @@ describe("releaseTwin", () => {
     expect(await releaseTwin(userId, tdb.db)).toBe(false); // nothing to release
   });
 });
+
+describe("chatWithTwin actions", () => {
+  // @ts-expect-error drizzle exposes raw client via session.client
+  const sql = () => tdb.db.session.client as { unsafe: (q: string) => Promise<Record<string, unknown>[]> };
+
+  it("a hug Ravi agrees to brings them closer and both remember it", async () => {
+    await sql().unsafe(`delete from relationships; insert into relationships (from_twin_id, to_twin_id, score) values ('${raviId}', '${mineId}', 40)`);
+    const out = await chatWithTwin(userId, "hug Ravi", toolBrain({ text: "", toolCalls: [] }), tdb.db);
+    expect(out.order).toMatchObject({ kind: "act", targetName: "Ravi", action: { id: "hug", refused: false } });
+    const rel = await sql().unsafe(`select score from relationships where from_twin_id = '${mineId}' and to_twin_id = '${raviId}'`);
+    expect(Number(rel[0].score)).toBeGreaterThan(0);
+    const mem = await sql().unsafe(`select content from memories where twin_id = '${raviId}' and kind = 'act'`);
+    expect(String(mem[0]?.content)).toContain("hug");
+  });
+
+  it("a cheek kiss Ravi refuses hurts a little and is remembered", async () => {
+    await sql().unsafe(`delete from relationships; insert into relationships (from_twin_id, to_twin_id, score) values ('${raviId}', '${mineId}', -40)`);
+    const out = await chatWithTwin(userId, "kiss Ravi on the cheek", toolBrain({ text: "", toolCalls: [] }), tdb.db);
+    expect(out.order!.action).toMatchObject({ id: "kiss_cheek", refused: true });
+    const rel = await sql().unsafe(`select score from relationships where from_twin_id = '${mineId}' and to_twin_id = '${raviId}'`);
+    expect(Number(rel[0].score)).toBeLessThan(0);
+  });
+
+  it("something against the rules is refused in character and changes nothing", async () => {
+    const out = await chatWithTwin(userId, "punch Ravi", toolBrain({
+      text: "Sure!", toolCalls: [{ name: "do_action", input: { action: "punch", target: "Ravi" } }]
+    }), tdb.db);
+    expect(out.worldChanged).toBe(false);
+    expect(out.reply).toMatch(/violence/);
+  });
+});
+
+describe("chatWithTwin without an AI set up", () => {
+  it("still follows simple orders", async () => {
+    const out = await chatWithTwin(userId, "go to the lawn", null, tdb.db);
+    expect(out.command).toEqual({ type: "go", zone: "event_space" });
+    expect(out.reply).toBe("On my way to THE LAWN!");
+  });
+  it("points the player to Settings for real conversation", async () => {
+    const out = await chatWithTwin(userId, "how are you?", null, tdb.db);
+    expect(out.reply).toMatch(/Settings/);
+  });
+});

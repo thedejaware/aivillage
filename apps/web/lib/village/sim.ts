@@ -2,14 +2,15 @@
  * VillageSim — the twins' bodies. Pure TypeScript (no three.js): the renderer
  * reads each twin's transform + pose every frame, and tests drive it directly.
  *
- * Antigravity-style ambient life at zero LLM cost:
+ * Ambient life at zero LLM cost, around the place the AI sent each twin:
  *  - twins walk the road network (no straight-line cutting)
  *  - venue activities: café coffee, bench sitting, lawn picnics, stage moments
- *  - canned chats when idle twins bump into each other
+ *  - wordless emoji chats when idle twins bump into each other
+ * WHERE a twin goes is decided by its AI (server frames), not by random strolls.
  * Owner orders override all of it: the twin walks where it was sent, stays,
  * and reports arrival once. Real drama still comes from the server frames.
  */
-import { orderStatus, type WorldState, type WorldTwinView } from "@aivillage/shared";
+import { orderStatus, DEFAULT_ZONES, type BodyAnim, type TwinPose, type WorldState, type WorldTwinView } from "@aivillage/shared";
 import { findRoute, tileToWorld, zoneCenter, SPOTS, ISLAND_HALF, type Pt, type SpotDef, type ActivityKind } from "./layout";
 
 /** Walking speed, world units per second. */
@@ -19,6 +20,11 @@ const TALK_RANGE = 1.35;
 const PAIR_COOLDOWN_S = 90;
 /** How long a talk target waits for its visitor. */
 const HOLD_FOR_VISITOR_S = 40;
+/** How close a twin stands to its partner for a hug / high-five. */
+const TOUCH_DISTANCE = 0.45;
+/** A placed action starts once the twin is this close to the venue. */
+const NEAR_VENUE = 1.2;
+const REFUSAL_SECONDS = 3;
 const ROAM = ISLAND_HALF - 0.8;
 
 const ACTIVITY_EMOJI: Record<ActivityKind, string[]> = {
@@ -30,20 +36,29 @@ const ACTIVITY_EMOJI: Record<ActivityKind, string[]> = {
 const ACTIVITY_DURATION: Record<ActivityKind, [number, number]> = {
   coffee: [10, 18], bench: [9, 16], blanket: [10, 18], stage: [6, 11]
 };
-/** Sitting pose offsets for the (unrigged) bodies — stylized but readable. */
-export const SIT_DROP: Record<ActivityKind, number> = { coffee: 0, bench: 0.17, blanket: 0.2, stage: 0 };
+/** The avatar's "sit" puts its seat ~0.24 up (bench height); on the grass the body drops by this. */
+const GROUND_SIT_DROP = 0.22;
+const ACTIVITY_ANIM: Record<ActivityKind, BodyAnim> = { coffee: "drink", bench: "sit", blanket: "sit", stage: "dance" };
+/** What the partner does back (a cheek kiss gets a happy laugh, not a kiss). */
+const RECIPROCAL: Partial<Record<BodyAnim, BodyAnim>> = { kiss: "laugh" };
 
+/**
+ * Idle side chats are wordless (emoji only): every real word in the village
+ * comes from the player's AI, never from canned lines.
+ */
 const AMBIENT_DIALOGS: string[][] = [
-  ["Psst — did you hear about {n}?", "No! Tell me everything.", "Not here. Too many ears."],
-  ["The café smells amazing today.", "Race you to the counter!"],
-  ["I'm plotting something big.", "You always say that.", "This time it's real."],
-  ["Nice day on the island, isn't it?", "Every day is nice on a floating island."],
-  ["{n} has been acting strange lately…", "Strange how?", "Stage-strange. Watch them."],
-  ["My owner told me a secret.", "Ooooh. Trade you for mine?"],
-  ["I want a bigger house near the lawn.", "Dream big, build bigger."]
+  ["👋", "👋", "😊"],
+  ["☕", "😋"],
+  ["🤫", "👀", "😮"],
+  ["😂", "😂"],
+  ["🌸", "😊"],
+  ["🤔", "💡", "👍"],
+  ["🎶", "💃"]
 ];
+/** How far an idle twin drifts from where the AI last sent it. */
+const LOITER = 0.7;
 
-export type Mode = "idle" | "walk" | "activity" | "talk";
+export type Mode = "idle" | "walk" | "activity" | "talk" | "perform";
 export interface SpotState extends SpotDef { busyBy: string | null; }
 type Order = WorldTwinView["order"];
 
@@ -56,22 +71,21 @@ export interface SimTwin {
   z: number;
   /** facing (three.js Y rotation; 0 = +z) */
   yaw: number;
-  /** body offset/tilt for bobbing, sitting and walking sway */
-  bodyY: number;
-  tiltX: number;
-  roll: number;
-  cupVisible: boolean;
-  cupLift: number;
   /** ambient speech bubble / activity emoji */
   bubble: string | null;
   /** owner-order status, e.g. "🚶 Heading to THE CAFÉ" */
   status: string | null;
+  /** body animation + when it started (sim time, seconds) */
+  anim: BodyAnim;
+  animStart: number;
   // ---- behaviour state ----
   mode: Mode;
   route: Pt[];
   onArrive: SpotState | null;
   activity: { spot: SpotState; until: number; emojiAt: number; emojiUntil: number } | null;
   talk: { partnerId: string; lines: string[]; mine: boolean[]; idx: number; nextAt: number } | null;
+  /** playing an action (its own, or as the partner of someone else's) */
+  perform: { until: number; partnerId: string | null } | null;
   order: Order;
   orderKey: string;
   orderArrived: boolean;
@@ -102,7 +116,36 @@ function hash(s: string): number {
   return h;
 }
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const orderKeyOf = (o: Order) => (o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}` : "");
+const orderKeyOf = (o: Order) =>
+  o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}:${o.action?.id ?? ""}:${o.action?.refused ? 1 : 0}:${o.issuedAt ?? ""}` : "";
+
+/** The venue nearest to a world point. */
+function nearestZone(p: Pt): string {
+  let best = DEFAULT_ZONES[0].name;
+  let bd = Infinity;
+  for (const z of DEFAULT_ZONES) {
+    const c = zoneCenter(z.name);
+    const d = (c.x - p.x) ** 2 + (c.z - p.z) ** 2;
+    if (d < bd) { bd = d; best = z.name; }
+  }
+  return best;
+}
+
+/** Vertical body offset: sitting on the grass (blanket, or "sit" anywhere) instead of a seat. */
+export function bodyLift(tw: SimTwin): number {
+  return tw.anim === "sit" && tw.activity?.spot.kind !== "bench" ? -GROUND_SIT_DROP : 0;
+}
+
+/** What the avatar renderer needs each frame. */
+export function avatarPose(tw: SimTwin, now: number) {
+  return {
+    anim: tw.anim,
+    animTime: Math.max(0, now - tw.animStart),
+    walking: tw.route.length > 0,
+    walkPhase: tw.walkPhase,
+    speed: tw.speedMul
+  };
+}
 
 export class VillageSim {
   readonly twins = new Map<string, SimTwin>();
@@ -176,6 +219,11 @@ export class VillageSim {
     this.beginActivity(tw, spot, now);
   }
 
+  /** Where everyone is now — saved so the village resumes exactly here. */
+  poses(): (TwinPose & { id: string })[] {
+    return [...this.twins.values()].map((tw) => ({ id: tw.id, x: tw.x, z: tw.z, yaw: tw.yaw, zone: nearestZone(tw) }));
+  }
+
   // ---------------- per-frame ----------------
 
   step(now: number, dt: number): void {
@@ -197,6 +245,7 @@ export class VillageSim {
       if (tw.route.length > 0) this.stepWalk(tw, now, dt);
       else if (tw.mode === "activity" && tw.activity) this.stepActivity(tw, now);
       else if (tw.mode === "talk" && tw.talk) this.stepTalk(tw, now);
+      else if (tw.mode === "perform" && tw.perform) this.stepPerform(tw, now);
       else this.stepIdle(tw, now);
     }
   }
@@ -206,6 +255,7 @@ export class VillageSim {
   private startOrder(tw: SimTwin, now: number): void {
     this.stopActivity(tw);
     this.stopTalk(tw);
+    this.stopPerform(tw, now);
     tw.applyAt = 0;
     tw.orderArrived = false;
     const order = tw.order;
@@ -220,20 +270,17 @@ export class VillageSim {
     if (order.kind === "stay") {
       tw.route = [];
       tw.mode = "idle";
-      this.arriveOrder(tw);
+      this.arriveOrder(tw, now);
+      return;
+    }
+    if (order.kind === "act") {
+      this.startAct(tw, now);
       return;
     }
     if (order.kind === "talk_to") {
       const target = this.byName(order.targetName);
-      if (target && !target.order) {
-        // the target waits for its visitor instead of wandering off
-        this.stopTalk(target);
-        if (target.mode === "walk") {
-          target.route = [];
-          target.mode = "idle";
-        }
-        target.heldUntil = now + HOLD_FOR_VISITOR_S;
-      }
+      // the target waits for its visitor instead of wandering off
+      if (target) this.holdForVisitor(target, now);
       const c = target ? { x: target.x, z: target.z } : zoneCenter(order.zone);
       this.walkTo(tw, { x: c.x - 0.55, z: c.z + 0.35 }, null);
       return;
@@ -259,13 +306,78 @@ export class VillageSim {
     }
   }
 
-  private arriveOrder(tw: SimTwin): void {
+  /** Act order: go to the partner or the venue (if needed), then perform. */
+  private startAct(tw: SimTwin, now: number): void {
+    const action = tw.order?.action;
+    const target = action?.targetName ? this.byName(action.targetName) : undefined;
+    if (target && target !== tw) {
+      this.holdForVisitor(target, now);
+      const dx = tw.x - target.x;
+      const dz = tw.z - target.z;
+      const d = Math.hypot(dx, dz) || 1;
+      this.walkTo(tw, { x: target.x + (dx / d) * TOUCH_DISTANCE, z: target.z + (dz / d) * TOUCH_DISTANCE }, null);
+      return;
+    }
+    if (action?.place) {
+      const c = zoneCenter(action.place);
+      if (Math.hypot(c.x - tw.x, c.z - tw.z) > NEAR_VENUE) {
+        this.walkTo(tw, { x: c.x + 0.4, z: c.z + 0.4 }, null);
+        return;
+      }
+    }
+    tw.route = [];
+    tw.mode = "idle";
+    this.arriveOrder(tw, now);
+  }
+
+  private holdForVisitor(target: SimTwin, now: number): void {
+    if (target.order) return;
+    this.stopTalk(target);
+    if (target.mode === "walk") {
+      target.route = [];
+      target.onArrive = null;
+      target.mode = "idle";
+    }
+    target.applyAt = 0;
+    target.heldUntil = now + HOLD_FOR_VISITOR_S;
+  }
+
+  /** Play the ordered action (with the partner, if any). */
+  private perform(tw: SimTwin, now: number): void {
+    const action = tw.order?.action;
+    if (!action) return;
+    const partner = action.targetName ? this.byName(action.targetName) : undefined;
+    if (partner && partner !== tw) {
+      this.stopActivity(partner);
+      this.stopTalk(partner);
+      this.stopPerform(partner, now);
+      tw.yaw = Math.atan2(partner.x - tw.x, partner.z - tw.z);
+      partner.yaw = Math.atan2(tw.x - partner.x, tw.z - partner.z);
+    }
+    const seconds = action.refused ? REFUSAL_SECONDS : action.seconds;
+    const play = (who: SimTwin, anim: BodyAnim, bubble: string, partnerId: string | null) => {
+      who.mode = "perform";
+      who.perform = { until: now + seconds, partnerId };
+      who.bubble = bubble;
+      this.setAnim(who, anim, now);
+    };
+    if (action.refused) {
+      play(tw, "think", "🙁", partner?.id ?? null);
+      if (partner && partner !== tw) play(partner, "idle", "🙅", tw.id);
+      return;
+    }
+    play(tw, action.anim, action.emoji, partner?.id ?? null);
+    if (partner && partner !== tw) play(partner, RECIPROCAL[action.anim] ?? action.anim, action.emoji, tw.id);
+  }
+
+  private arriveOrder(tw: SimTwin, now: number): void {
     if (!tw.order || tw.orderArrived) return;
     tw.orderArrived = true;
     if (tw.order.kind === "talk_to") {
       const target = this.byName(tw.order.targetName);
       if (target) tw.yaw = Math.atan2(target.x - tw.x, target.z - tw.z);
     }
+    if (tw.order.kind === "act") this.perform(tw, now);
     tw.status = orderStatus(tw.order, true);
     this.onOrderArrive?.(tw.id, tw.status);
   }
@@ -281,13 +393,11 @@ export class VillageSim {
     if (d > step) {
       tw.x += (dx / d) * step;
       tw.z += (dz / d) * step;
-      tw.walkPhase += dt * 9;
+      tw.walkPhase += (step / WALK_SPEED) * 9; // follows distance walked: no foot sliding
       let dy = Math.atan2(dx, dz) - tw.yaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
       tw.yaw += dy * Math.min(1, dt * 8);
-      tw.bodyY = Math.abs(Math.sin(tw.walkPhase)) * 0.045;
-      tw.roll = Math.sin(tw.walkPhase) * 0.035;
       return;
     }
     tw.x = target.x;
@@ -297,8 +407,6 @@ export class VillageSim {
 
     // arrived
     tw.walkPhase = 0;
-    tw.bodyY = 0;
-    tw.roll = 0;
     const spot = tw.onArrive;
     tw.onArrive = null;
     if (spot && spot.busyBy === tw.id) {
@@ -307,7 +415,7 @@ export class VillageSim {
       tw.mode = "idle";
       tw.nextWanderAt = now + (spot ? 1 : 2 + this.random() * 4);
     }
-    if (tw.order) this.arriveOrder(tw);
+    if (tw.order) this.arriveOrder(tw, now);
   }
 
   private beginActivity(tw: SimTwin, spot: SpotState, now: number): void {
@@ -317,24 +425,13 @@ export class VillageSim {
     tw.activity = { spot, until, emojiAt: now + 1 + this.random() * 2, emojiUntil: 0 };
     tw.mode = "activity";
     tw.yaw = spot.yaw;
-    tw.bodyY = -SIT_DROP[spot.kind];
-    tw.tiltX = spot.kind === "bench" || spot.kind === "blanket" ? -0.1 : 0;
-    tw.cupVisible = spot.kind === "coffee";
+    this.setAnim(tw, ACTIVITY_ANIM[spot.kind], now);
   }
 
   private stepActivity(tw: SimTwin, now: number): void {
     const act = tw.activity!;
     const k = act.spot.kind;
-    if (k === "coffee") {
-      const sip = Math.max(0, Math.sin((now * 1.4 + tw.phase) % (Math.PI * 2)));
-      tw.cupLift = sip * 0.14;
-      tw.bodyY = Math.sin(now * 1.1 + tw.phase) * 0.008;
-    } else if (k === "stage") {
-      tw.bodyY = Math.abs(Math.sin(now * 3 + tw.phase)) * 0.08; // little performance hops
-      tw.yaw = act.spot.yaw + Math.sin(now * 1.4 + tw.phase) * 0.4;
-    } else {
-      tw.bodyY = -SIT_DROP[k] + Math.sin(now * 1.1 + tw.phase) * 0.008; // seated breathing
-    }
+    if (k === "stage") tw.yaw = act.spot.yaw + Math.sin(now * 1.4 + tw.phase) * 0.4; // play to the crowd
     if (now >= act.emojiAt) {
       const pool = ACTIVITY_EMOJI[k];
       tw.bubble = pool[Math.floor(this.random() * pool.length)];
@@ -353,7 +450,6 @@ export class VillageSim {
 
   private stepTalk(tw: SimTwin, now: number): void {
     const talk = tw.talk!;
-    tw.bodyY = Math.sin(now * 1.3 + tw.phase) * 0.012;
     if (now < talk.nextAt) return;
     talk.idx += 1;
     if (talk.idx >= talk.lines.length) {
@@ -372,31 +468,25 @@ export class VillageSim {
     talk.nextAt = now + TALK_LINE_SECONDS;
   }
 
+  private stepPerform(tw: SimTwin, now: number): void {
+    if (now < tw.perform!.until) return;
+    this.stopPerform(tw, now);
+  }
+
   private stepIdle(tw: SimTwin, now: number): void {
-    tw.bodyY = Math.sin(now * 1.1 + tw.phase) * 0.012;
-    tw.roll = 0;
     if (!this.ambient || tw.order || tw.heldUntil > now || now < tw.nextWanderAt) return;
-    const roll = this.random();
-    const free = this.spots.filter((s) => s.busyBy === null);
-    if (roll < 0.45 && free.length > 0) {
-      // go do something at a venue (sit, sip, perform)
+    // stay around the venue the AI last sent this twin to
+    const home = nearestZone({ x: tw.ax, z: tw.az });
+    const free = this.spots.filter((s) => s.busyBy === null && s.zone === home);
+    if (this.random() < 0.5 && free.length > 0) {
+      // do something at this venue (sit, sip, perform)
       const spot = free[Math.floor(this.random() * free.length)];
       spot.busyBy = tw.id;
       this.walkTo(tw, { x: spot.x, z: spot.z }, spot);
-    } else if (roll < 0.8) {
-      // stroll the roads to somewhere else on the island
-      const dest = {
-        x: clamp(tw.x + (this.random() - 0.5) * 7, -ROAM, ROAM),
-        z: clamp(tw.z + (this.random() - 0.5) * 7, -ROAM, ROAM)
-      };
-      tw.ax = dest.x;
-      tw.az = dest.z;
-      this.walkTo(tw, dest, null);
     } else {
-      // loiter near the current spot
       this.walkTo(tw, {
-        x: clamp(tw.x + (this.random() - 0.5) * 1.4, -ROAM, ROAM),
-        z: clamp(tw.z + (this.random() - 0.5) * 1.4, -ROAM, ROAM)
+        x: clamp(tw.ax + (this.random() - 0.5) * 2 * LOITER, -ROAM, ROAM),
+        z: clamp(tw.az + (this.random() - 0.5) * 2 * LOITER, -ROAM, ROAM)
       }, null);
     }
     tw.nextWanderAt = now + 6 + this.random() * 9;
@@ -416,15 +506,14 @@ export class VillageSim {
         const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
         if ((this.pairCooldown.get(key) ?? 0) > now) continue;
         this.pairCooldown.set(key, now + PAIR_COOLDOWN_S + this.random() * 60);
-        const raw = AMBIENT_DIALOGS[Math.floor(this.random() * AMBIENT_DIALOGS.length)];
-        const others = [...this.twins.values()].filter((t) => t.id !== a.id && t.id !== b.id).map((t) => t.name);
-        const n = others[Math.floor(this.random() * Math.max(1, others.length))] ?? "someone";
-        const lines = raw.map((l) => l.replace("{n}", n));
+        const lines = AMBIENT_DIALOGS[Math.floor(this.random() * AMBIENT_DIALOGS.length)];
         const mine = lines.map((_, k) => k % 2 === 0);
         a.talk = { partnerId: b.id, lines, mine, idx: -1, nextAt: now + 0.3 };
         b.talk = { partnerId: a.id, lines, mine: mine.map((v) => !v), idx: -1, nextAt: Infinity };
         a.mode = "talk";
         b.mode = "talk";
+        this.setAnim(a, "talk", now);
+        this.setAnim(b, "talk", now);
         a.yaw = Math.atan2(b.x - a.x, b.z - a.z);
         b.yaw = Math.atan2(a.x - b.x, a.z - b.z);
       }
@@ -435,10 +524,12 @@ export class VillageSim {
 
   private create(v: WorldTwinView, now: number): SimTwin {
     const p = tileToWorld(v.col, v.row);
+    // a saved pose puts the twin back exactly where the player left it
+    const at = v.pose ?? { x: p.x, z: p.z, yaw: 0 };
     return {
       id: v.id, name: v.name, colorHex: v.colorHex,
-      x: p.x, z: p.z, yaw: 0, bodyY: 0, tiltX: 0, roll: 0,
-      cupVisible: false, cupLift: 0, bubble: null, status: null,
+      x: at.x, z: at.z, yaw: at.yaw, bubble: null, status: null,
+      anim: "idle", animStart: now, perform: null,
       mode: "idle", route: [], onArrive: null, activity: null, talk: null,
       order: null, orderKey: "", orderArrived: false, heldUntil: 0,
       ax: p.x, az: p.z, nextTx: p.x, nextTz: p.z, applyAt: 0,
@@ -459,6 +550,30 @@ export class VillageSim {
     tw.route = findRoute({ x: tw.x, z: tw.z }, to);
     tw.onArrive = arrive;
     tw.mode = "walk";
+    tw.anim = "idle";
+  }
+
+  private setAnim(tw: SimTwin, anim: BodyAnim, now: number): void {
+    if (tw.anim === anim) return;
+    tw.anim = anim;
+    tw.animStart = now;
+  }
+
+  private stopPerform(tw: SimTwin, now: number): void {
+    if (!tw.perform) return;
+    const partner = tw.perform.partnerId ? this.twins.get(tw.perform.partnerId) : undefined;
+    tw.perform = null;
+    tw.mode = "idle";
+    tw.bubble = null;
+    this.setAnim(tw, "idle", now);
+    tw.nextWanderAt = now + 2 + this.random() * 3;
+    if (partner?.perform?.partnerId === tw.id) {
+      partner.perform = null;
+      partner.mode = "idle";
+      partner.bubble = null;
+      this.setAnim(partner, "idle", now);
+      partner.heldUntil = Math.min(partner.heldUntil, now + 2);
+    }
   }
 
   private stopActivity(tw: SimTwin): void {
@@ -467,11 +582,8 @@ export class VillageSim {
       tw.activity = null;
     }
     if (tw.onArrive && tw.onArrive.busyBy === tw.id) tw.onArrive.busyBy = null;
-    tw.cupVisible = false;
-    tw.cupLift = 0;
-    tw.bodyY = 0;
-    tw.tiltX = 0;
     tw.bubble = null;
+    if (tw.anim !== "idle") tw.anim = "idle";
   }
 
   private stopTalk(tw: SimTwin): void {
@@ -480,10 +592,12 @@ export class VillageSim {
     tw.talk = null;
     tw.mode = "idle";
     tw.bubble = null;
+    tw.anim = "idle";
     if (partner?.talk?.partnerId === tw.id) {
       partner.talk = null;
       partner.mode = "idle";
       partner.bubble = null;
+      partner.anim = "idle";
     }
   }
 }

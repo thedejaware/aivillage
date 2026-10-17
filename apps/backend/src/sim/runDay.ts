@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   toWorldState, DEFAULT_ZONES, DAILY_ENERGY, labelFor, isOrderActive,
+  resolveAction, findAction, consentGiven, ACT_HOLD_MS,
   type WorldState, type Twin, type Memory, type Structure, type LlmClient,
   type BeatResult, type SocialMove
 } from "@aivillage/shared";
@@ -344,6 +345,50 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           const line = `${w.twin.name} wants to ${beatResult.kind === "confess" ? "open up to" : beatResult.kind} ${targetTwin.name} — and asks you first.`;
           w.recent.push(remember(w.twin.id, "note", line, 2));
           says[w.twin.id] = line;
+        }
+      } else if (beatResult.verb === "act" && beatResult.action && !orderZone(w.twin)) {
+        // v4: the twin's own AI picked a real action — the client walks there and performs it.
+        const res = resolveAction({ action: beatResult.action, target: beatResult.target, emoji: beatResult.emoji });
+        const partner = res.ok && res.action.targetName ? twinByName.get(res.action.targetName) : undefined;
+        if (!res.ok || (res.action.targetName && (!partner || partner.id === w.twin.id))) {
+          // unsafe, impossible or no such partner: nothing happens
+          const line = `${w.twin.name} thinks better of it.`;
+          w.recent.push(remember(w.twin.id, "note", line));
+          says[w.twin.id] = line;
+        } else {
+          const def = findAction(res.action.id);
+          const refused = partner && def ? !consentGiven(def, scoreOf(partner.id, w.twin.id)) : false;
+          const action = { ...res.action, ...(partner ? { refused } : {}) };
+          const partnerZone = partner ? (work.find((ww) => ww.twin.id === partner.id)?.twin ?? partner).locationZone : null;
+          const zone = partnerZone ?? action.place ?? w.twin.locationZone;
+          w.twin = {
+            ...w.twin,
+            locationZone: zone,
+            order: {
+              kind: "act", auto: true, zone, targetName: partner?.name ?? null,
+              label: partner ? `${action.label} ${partner.name}` : action.label,
+              issuedAt: runStartedAt.toISOString(),
+              holdUntil: new Date(runStartedAt.getTime() + ACT_HOLD_MS).toISOString(),
+              action
+            }
+          };
+          const zz = zoneByName.get(zone) ?? DEFAULT_ZONES[0];
+          positions[w.twin.id] = { col: zz.col, row: zz.row };
+          if (partner && refused) {
+            await shift(w.twin.id, partner.id, -3);
+            const line = `${partner.name} said no to ${/^[aeiou]/i.test(action.label) ? "an" : "a"} ${action.label} from ${w.twin.name}.`;
+            w.recent.push(remember(w.twin.id, "act", line));
+            remember(partner.id, "act", line);
+            says[w.twin.id] = line;
+          } else {
+            if (partner) {
+              await shift(w.twin.id, partner.id, 3);
+              await shift(partner.id, w.twin.id, 2);
+              remember(partner.id, "act", beatResult.narrative);
+            }
+            w.recent.push(remember(w.twin.id, "act", beatResult.narrative));
+            says[w.twin.id] = beatResult.narrative;
+          }
         }
       } else if (orderZone(w.twin)) {
         // Following the owner's order: the beat still happens (narrative), but in place.

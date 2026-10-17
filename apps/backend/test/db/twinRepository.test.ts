@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import type { Twin } from "@aivillage/shared";
+import { DEFAULT_APPEARANCE, withGender, type Twin } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "./helpers.js";
 import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
 
@@ -55,6 +55,28 @@ describe("DrizzleTwinRepository", () => {
     expect((await repo.listAll()).find((t) => t.id === id)!.order).toEqual(order);
     await repo.save({ ...newTwin(id), order: null });
     expect((await repo.getById(id))!.order).toBeNull();
+  });
+
+  it("persists look, role, active flag and saved pose", async () => {
+    const id = "44444444-4444-4444-4444-444444444444";
+    const appearance = { ...withGender(DEFAULT_APPEARANCE, "male"), skin: "tan", face: "wink", hair: "afro", hairColor: "black", accessory: "cap", outfit: "hoodie", outfitColor: "red", facialHair: "full_beard" };
+    const pose = { x: 1.5, z: -0.25, yaw: 2, zone: "maker_space" };
+    await repo.save({ ...newTwin(id), appearance, role: "main", active: true, pose });
+    expect(await repo.getById(id)).toMatchObject({ appearance, role: "main", active: true, pose });
+  });
+
+  it("listAll returns only twins living in the village; listEverything includes deactivated ones", async () => {
+    const id = "55555555-5555-5555-5555-555555555555";
+    await repo.save({ ...newTwin(id), active: false });
+    expect((await repo.listAll()).some((t) => t.id === id)).toBe(false);
+    expect((await repo.listEverything()).some((t) => t.id === id)).toBe(true);
+    expect((await repo.getById(id))!.active).toBe(false);
+  });
+
+  it("defaults: villager, active, no pose", async () => {
+    const id = "66666666-6666-6666-6666-666666666666";
+    await repo.save(newTwin(id));
+    expect(await repo.getById(id)).toMatchObject({ role: "villager", active: true, pose: null });
   });
 
   it("updates an existing twin on save (upsert)", async () => {

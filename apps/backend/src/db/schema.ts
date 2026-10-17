@@ -1,5 +1,5 @@
 import { pgTable, text, integer, boolean, timestamp, jsonb, uuid } from "drizzle-orm/pg-core";
-import type { Skills, OwnerOrder } from "@aivillage/shared";
+import type { Skills, OwnerOrder, Appearance, TwinPose } from "@aivillage/shared";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -22,7 +22,16 @@ export const twins = pgTable("twins", {
   energyUpdatedAt: timestamp("energy_updated_at", { withTimezone: true }).notNull().defaultNow(),
   isNpc: boolean("is_npc").notNull().default(false),
   /** the owner's current order; null = living autonomously */
-  ownerOrder: jsonb("owner_order").$type<OwnerOrder | null>()
+  ownerOrder: jsonb("owner_order").$type<OwnerOrder | null>(),
+  /** avatar builder choices */
+  appearance: jsonb("appearance").$type<Appearance | null>(),
+  /** "main" (the player's own twin) or "villager" */
+  role: text("role").notNull().default("villager"),
+  /** false = deactivated: hidden from the village, data kept */
+  active: boolean("active").notNull().default(true),
+  /** exact spot saved by the browser (resume where the player left) */
+  pose: jsonb("pose").$type<TwinPose | null>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 export const creditLedger = pgTable("credit_ledger", {
@@ -88,4 +97,15 @@ export const approvals = pgTable("approvals", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   consumedAt: timestamp("consumed_at", { withTimezone: true })
+});
+
+/** The local village's settings: one row (id = "local"). The AI key stays on the player's machine. */
+export const villageSettings = pgTable("village_settings", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  apiKey: text("api_key"),
+  baseUrl: text("base_url"),
+  chattiness: text("chattiness").notNull().default("normal"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

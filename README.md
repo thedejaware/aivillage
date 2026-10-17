@@ -1,72 +1,187 @@
 # AiVillage
 
-> Create your digital twin, give it goals, and watch it live, work, socialize, and build a shared world — stepping in to approve the moments that matter.
+Your own private village of AI twins, running on your computer.
 
-AiVillage is a **social life-simulation game** — think *The Sims* × a living, global world, inspired by Google's Antigravity Orbit demo. You create an avatar and an AI **twin**. Your twin lives semi-autonomously in a shared, Antigravity-style pixel-art world, meets other twins, and collaborates to **build the village** — pausing for **your approval on the moves that matter**.
-
-The heart of it is the **return moment**: you open the app and your twin has *lived a little while you were away* — made progress, met someone, and now needs a decision from you.
+You build twins that look like you and your family. You talk to your main twin and give it orders. The twins live, talk and act on their own. They are powered by **your** AI model.
 
 ---
 
-## Status
+## Quick start
 
-🚧 **Pre-development.** The design is complete and the implementation plan is next.
+You need only **Docker**. Nothing else.
 
-- 📄 Design spec: [`docs/superpowers/specs/2026-06-28-aivillage-design.md`](docs/superpowers/specs/2026-06-28-aivillage-design.md)
-- 📝 Concept source (Antigravity demo summary): [`src/docs/aivillage.md`](src/docs/aivillage.md)
+**1. Install Docker Desktop**
 
----
+- macOS: [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) (Apple Silicon and Intel both work)
+- Windows: [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
+- Linux: [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin, or [Docker Desktop for Linux](https://docs.docker.com/desktop/setup/install/linux/)
 
-## How it works
+Start Docker Desktop and wait until it says it is running.
 
-Everything is **one loop**, repeating daily:
+**2. Get AiVillage and start it**
 
-```
-⚡ Daily Energy  →  Work · Socialize · Move  →  🏗️ Project progresses  →  🏠 Village grows + 📈 Skills
-        ↑__________________  digest + your approvals when you return  __________________↑
+```bash
+git clone https://github.com/thedejaware/aivillage.git && cd aivillage && docker compose up -d
 ```
 
-- **Your twin acts on its own** toward the goals you set — but **asks for your approval** on meaningful moves (starting a big or joint project, spending credits, irreversible choices).
-- **A daily "beat budget"** means your twin lives a few meaningful moments per day, then hands you a digest + batched decisions. This keeps it feeling alive *and* keeps running costs bounded.
-- **Projects are the spine.** Solo or joint, they take several beats to finish, and completed projects become **real buildings in the shared world** — the village is built, brick by brick, by twins worldwide.
-- **A seeded, hybrid world.** It's populated with AI NPC twins from day one and real players' twins blend in seamlessly — so it feels alive immediately, with no empty-world cold start.
+The first start builds the app. This takes a few minutes. Later starts are fast.
 
-## Economy
+**3. Open http://localhost:3000**
 
-- **Energy** — free, regenerates daily. This cap is the cost ceiling (and the daily-return habit).
-- **Credits** — purchasable; buy extra beats, commit to big/joint projects, or instant-finish.
+Follow the setup:
 
----
+1. **Choose your AI** — pick a provider and paste your key (see below).
+2. **Build your twin** — name, look, hair, clothes.
+3. Add more twins (for example your family), or fill the village with random villagers. Up to 10 twins can live in the village.
 
-## Tech stack
+You can change all of this later on the **⚙️ Settings** page: switch the AI, add or edit twins, hide a twin, or delete it.
 
-| Layer | Technology |
-|-------|-----------|
-| World rendering | **PixiJS** (2D WebGL, isometric) — client renderer reskinned from a16z's *AI Town* |
-| App shell / UI | **Next.js + React + TypeScript** |
-| Backend + simulation | **Own Node/TS service on Railway** (beat runner, agents, economy) |
-| Database | **Postgres on Railway** |
-| Realtime | **Socket.IO** (backend pushes world updates to clients) |
-| Auth · Storage | **Auth.js** · **Cloudflare R2** (avatars) |
-| Agent brains | **Claude** (Anthropic API) |
-| Avatars | Image model — photo → pixel-art sprite |
-
-> The database stores **discrete events** (~5–15 rows per twin per day), not per-second state — the client animates movement locally. The real cost driver is LLM inference, capped by the daily Energy system.
-
-## Development approach
-
-- **Test-Driven Development (TDD) is mandatory** — red → green → refactor, tests before implementation.
-- Built by a **coordinated team of AI agents**, parallelized along clean module boundaries.
-
-See the [design spec](docs/superpowers/specs/2026-06-28-aivillage-design.md) for the full module breakdown, data model, testing strategy, and build waves.
+The village pauses when you close the app. When you open it again, every twin is where you left it.
 
 ---
 
-## Roadmap (high level)
+## Choosing an AI
 
-- **v1 (Scope A)** — the signature build-the-village loop, seeded hybrid world, energy + credits, web.
-- **v2+** — richer social/relationships, twin-to-twin economy & events, native mobile.
+AiVillage does not include an AI. You connect your own. You choose it on the **Settings** page.
+
+| Provider | What it is | Get a key |
+|---|---|---|
+| **OpenRouter** | One key, many models from many companies | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| **Anthropic** | Claude models | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| **Google Gemini** | Gemini models | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **OpenAI** | GPT models | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| **Ollama** | Free. Runs on your own computer. No key. | [ollama.com/download](https://ollama.com/download) |
+
+**Your key stays on your computer.** It is saved in the village database on your machine. It is never sent to us.
+
+**You pay your provider.** Every time a twin thinks or talks, the app makes one AI call on your account.
+
+**Cost tip:** cheap "lite" models are enough for villagers. For example Claude Haiku, Gemini Flash-Lite or GPT mini models. Set a spending limit in your provider's dashboard.
+
+### Using Ollama (free, local)
+
+1. Install Ollama from [ollama.com](https://ollama.com/download).
+2. Download a model:
+
+   ```bash
+   ollama pull llama3.2
+   ```
+
+3. In Settings, choose **Ollama** and the model `llama3.2`.
+
+The app reaches Ollama on your computer at `http://host.docker.internal:11434`. A local model needs a reasonably fast computer. Replies can be slower than a cloud AI.
+
+### Setting the AI with environment variables (optional)
+
+If you prefer, you can set an Anthropic key when you start the app:
+
+```bash
+LLM_PROVIDER=anthropic LLM_MODEL=claude-haiku-4-5 ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+```
+
+You can also put these lines in a file named `.env` next to `docker-compose.yaml`. Most players do not need this. Use the Settings page.
 
 ---
 
-_Greenfield project, started 2026-06-28._
+## Everyday commands
+
+Run these in the `aivillage` folder.
+
+| What | Command |
+|---|---|
+| Start | `docker compose up -d` |
+| Stop (your village is kept) | `docker compose down` |
+| Update to the newest version | `git pull && docker compose up -d --build` |
+| Reset the village (deletes all twins and chats) | `docker compose down -v` |
+| See the logs | `docker compose logs -f backend` |
+
+### Change the ports
+
+The app uses port **3000** (web) and port **4000** (backend). To use other ports:
+
+```bash
+WEB_PORT=3100 API_PORT=4100 docker compose up -d --build
+```
+
+Then open http://localhost:3100. Use `--build` when you change `API_PORT`, because the web app stores the backend address when it is built.
+
+---
+
+## Troubleshooting
+
+**"port is already allocated" / "address already in use"**
+Another program uses port 3000 or 4000. Pick other ports (see "Change the ports" above).
+
+**The page opens but the village does not load**
+The backend may still be starting. Wait 30 seconds and reload. Check it with `docker compose ps` — all three services should be `healthy` or `running`. Look at `docker compose logs backend` for errors.
+
+**Ollama is not reachable**
+- Make sure Ollama is running (`ollama list` should work).
+- On **Linux**, Ollama listens only on `127.0.0.1` by default, so Docker cannot reach it. Start it with `OLLAMA_HOST=0.0.0.0 ollama serve`, or set `OLLAMA_HOST=0.0.0.0` in its service settings.
+- On macOS and Windows, Docker Desktop handles this for you.
+
+**Apple Silicon (M1/M2/M3/M4)**
+Works out of the box. All images run natively on ARM.
+
+**Start completely fresh**
+`docker compose down -v` deletes the village database. The next `docker compose up -d` starts an empty village.
+
+---
+
+## For developers
+
+AiVillage is a pnpm workspace:
+
+| Folder | What |
+|---|---|
+| `packages/shared` | Shared TypeScript types and logic (used as source, no build step) |
+| `apps/backend` | Node + Express + Socket.IO on :4000, Postgres with drizzle-orm |
+| `apps/web` | Next.js 14 (app router) on :3000 |
+
+You need Node 20+ and pnpm 9 (`corepack enable`).
+
+**1. Start Postgres** (Docker Desktop, or Colima on macOS). Dev uses port **5433**:
+
+```bash
+docker run -d --name aivillage-pg -p 5433:5432 \
+  -e POSTGRES_USER=aivillage -e POSTGRES_PASSWORD=aivillage -e POSTGRES_DB=aivillage \
+  postgres:16-alpine
+```
+
+Later, start it again with `docker start aivillage-pg`.
+
+**2. Install and set up**
+
+```bash
+pnpm install
+cp apps/backend/.env.example apps/backend/.env   # then edit it
+pnpm --filter @aivillage/backend db:push          # apply the schema
+```
+
+**3. Run**
+
+```bash
+pnpm --filter @aivillage/backend dev   # http://localhost:4000
+pnpm --filter @aivillage/web dev       # http://localhost:3000
+```
+
+**Tests**
+
+```bash
+pnpm -r test        # all packages
+pnpm -r typecheck
+```
+
+Backend database tests start their own Postgres with testcontainers. With **Colima**, export these first:
+
+```bash
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="/var/run/docker.sock"
+export TESTCONTAINERS_RYUK_DISABLED="true"
+```
+
+**Docker images**
+
+`docker-compose.yaml` builds `apps/backend/Dockerfile` and `apps/web/Dockerfile` from the repo root. On every start, the backend applies the schema with `drizzle-kit push --force` and then starts the server.
+
+Product plan: [`docs/product/2026-10-17-aivillage-v4-local-village-plan.md`](docs/product/2026-10-17-aivillage-v4-local-village-plan.md).

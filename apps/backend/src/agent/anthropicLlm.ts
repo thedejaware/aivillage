@@ -9,7 +9,7 @@ import type { LlmClient, LlmTool, ToolTurn } from "@aivillage/shared";
 export class AnthropicLlmClient implements LlmClient {
   private readonly client: Anthropic;
 
-  constructor(private readonly model = "claude-haiku-4-5", client?: Anthropic) {
+  constructor(private readonly model = "claude-haiku-5-5", client?: Anthropic) {
     this.client = client ?? new Anthropic(); // picks up ANTHROPIC_API_KEY from env
   }
 

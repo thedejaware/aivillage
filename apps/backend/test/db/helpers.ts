@@ -22,7 +22,12 @@ const CREATE_SQL = `
     energy integer not null default 0,
     energy_updated_at timestamptz not null default now(),
     is_npc boolean not null default false,
-    owner_order jsonb
+    owner_order jsonb,
+    appearance jsonb,
+    role text not null default 'villager',
+    active boolean not null default true,
+    pose jsonb,
+    created_at timestamptz not null default now()
   );
   create table credit_ledger (
     id uuid primary key default gen_random_uuid(),
@@ -74,6 +79,15 @@ const CREATE_SQL = `
     role text not null,
     content text not null,
     created_at timestamptz not null default now()
+  );
+  create table village_settings (
+    id text primary key,
+    provider text not null,
+    model text not null,
+    api_key text,
+    base_url text,
+    chattiness text not null default 'normal',
+    updated_at timestamptz not null default now()
   );
   create table relationships (
     id uuid primary key default gen_random_uuid(),

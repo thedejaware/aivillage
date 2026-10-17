@@ -1,4 +1,5 @@
 import type { OwnerOrder } from "./orders.js";
+import type { Appearance } from "./appearance.js";
 
 export type SkillName = "building" | "coding" | "art" | "social";
 export type Skills = Record<SkillName, number>; // level per skill
@@ -18,6 +19,24 @@ export interface Twin {
   isNpc: boolean;
   /** the owner's current order (null/absent = living autonomously) */
   order?: OwnerOrder | null;
+  /** how the twin looks (avatar builder); absent = default look */
+  appearance?: Appearance;
+  /** "main" = the player's own twin (only the active main one is chatted with); default "villager" */
+  role?: TwinRole;
+  /** false = deactivated: hidden from the village, data kept; default true */
+  active?: boolean;
+  /** exact spot saved by the browser so the village resumes where it was left */
+  pose?: TwinPose | null;
+}
+
+export type TwinRole = "main" | "villager";
+
+/** A twin's exact position in world units (renderer space). */
+export interface TwinPose {
+  x: number;
+  z: number;
+  yaw: number;
+  zone: string;
 }
 
 export interface Wallet {
@@ -65,7 +84,7 @@ export interface Structure {
   builtByTwinId?: string | null;
 }
 
-export type Verb = "work" | "socialize" | "move" | "chat" | "bond" | "scheme" | "bigmove";
+export type Verb = "work" | "socialize" | "move" | "chat" | "bond" | "scheme" | "bigmove" | "act";
 
 /** Big social moves that require the owner's approval. */
 export type SocialMove = "confront" | "confess" | "party" | "reconcile";
@@ -75,6 +94,9 @@ export interface BeatResult {
   target: string | null; // a zone name, a twin name, or null
   /** only for verb "bigmove" */
   kind?: SocialMove | null;
+  /** only for verb "act": a catalogue action id or a short free action */
+  action?: string | null;
+  emoji?: string | null;
   narrative: string;
 }
 
@@ -104,4 +126,42 @@ export interface Approval {
   createdAt: string; // ISO
   resolvedAt: string | null;
   consumedAt: string | null;
+}
+
+// --- Village settings (local app: one row) ---
+export type Chattiness = "calm" | "normal" | "busy";
+
+export interface VillageSettings {
+  /** "openrouter" | "anthropic" | "gemini" | "openai" | "ollama" */
+  provider: string;
+  model: string;
+  /** stored locally on the player's own machine; never sent back to the browser in full */
+  apiKey: string | null;
+  baseUrl: string | null;
+  chattiness: Chattiness;
+}
+
+/** Max twins living in one village at the same time (deactivated twins don't count). */
+export const MAX_TWINS = 10;
+
+/** A twin as the Settings page lists it. */
+export interface TwinSummary {
+  id: string;
+  name: string;
+  role: TwinRole;
+  active: boolean;
+  appearance: import("./appearance.js").Appearance;
+  traits: string[];
+  goals: string[];
+}
+
+/** Everything the app needs to know about the local village at startup. */
+export interface VillageInfo {
+  ownerId: string;
+  /** the active main twin (the one you chat with) */
+  mainTwinId: string | null;
+  aiConfigured: boolean;
+  twins: TwinSummary[];
+  livingCount: number;
+  maxTwins: number;
 }

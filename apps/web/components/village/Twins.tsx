@@ -2,69 +2,21 @@
 
 /**
  * The twins as React Three Fiber objects. All behaviour lives in VillageSim;
- * every frame each avatar copies its twin's transform + pose and updates its
- * labels through refs (no React re-render per frame).
+ * every frame each avatar reads its twin's transform + body animation and
+ * updates its labels through refs (no React re-render per frame).
  */
-import { Suspense, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
-import { Html, useGLTF } from "@react-three/drei";
-import type { VillageSim } from "../../lib/village/sim";
+import { Html } from "@react-three/drei";
+import type { Appearance } from "@aivillage/shared";
+import { avatarPose, bodyLift, type VillageSim } from "../../lib/village/sim";
+import { Avatar, type AvatarPose } from "./avatar";
 
 export const TWIN_HEIGHT = 1.05;
-/** If the characters walk sideways/backwards, tune this yaw offset (radians). */
-const MODEL_YAW = 0;
-const MODEL_URLS = ["/models/twin_male.glb", "/models/twin_female.glb"];
 const ACCENT = "#2f6bff";
 const hexCss = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-/** Scale a model to `targetH` and put its feet on the ground at the origin. */
-function normalizeModel(model: THREE.Object3D, targetH: number): void {
-  const b1 = new THREE.Box3().setFromObject(model);
-  const size = b1.getSize(new THREE.Vector3());
-  model.scale.setScalar(targetH / Math.max(size.y, 0.0001));
-  model.updateMatrixWorld(true);
-  const b2 = new THREE.Box3().setFromObject(model);
-  const c = b2.getCenter(new THREE.Vector3());
-  model.position.x -= c.x;
-  model.position.z -= c.z;
-  model.position.y -= b2.min.y;
-}
-
-function GltfBody({ url }: { url: string }) {
-  const { scene } = useGLTF(url);
-  const model = useMemo(() => {
-    const m = scene.clone(true);
-    normalizeModel(m, TWIN_HEIGHT);
-    m.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) o.castShadow = true;
-    });
-    return m;
-  }, [scene]);
-  return <primitive object={model} />;
-}
-
-/** Capsule stand-in while the GLB loads (or if it is missing). */
-function CapsuleBody({ color }: { color: number }) {
-  return (
-    <group>
-      <mesh position={[0, 0.43, 0]} castShadow>
-        <capsuleGeometry args={[0.18, 0.5, 6, 14]} />
-        <meshStandardMaterial color={color} roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 0.95, 0]} castShadow>
-        <sphereGeometry args={[0.17, 18, 14]} />
-        <meshStandardMaterial color={0xf2cda6} roughness={0.7} />
-      </mesh>
-    </group>
-  );
-}
+const REST_POSE: AvatarPose = { anim: "idle", animTime: 0, walking: false, walkPhase: 0, speed: 1 };
 
 const pill: React.CSSProperties = {
   fontFamily: "var(--font-ui), Inter, system-ui, sans-serif",
@@ -76,19 +28,20 @@ const pill: React.CSSProperties = {
 export function TwinAvatar({
   id,
   sim,
+  appearance,
   isMine,
   selected,
   onSelect
 }: {
   id: string;
   sim: VillageSim;
+  appearance: Appearance;
   isMine: boolean;
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
-  const cup = useRef<THREE.Group>(null);
   const ring = useRef<THREE.Mesh>(null);
   const nameEl = useRef<HTMLDivElement>(null);
   const statusEl = useRef<HTMLDivElement>(null);
@@ -98,18 +51,21 @@ export function TwinAvatar({
 
   const twin0 = sim.twins.get(id);
   const color = twin0?.colorHex ?? 0x5b8cff;
-  const url = MODEL_URLS[hash(id) % MODEL_URLS.length];
+  // world updates bring a fresh object each time — rebuild the body only when the look changes
+  const lookKey = JSON.stringify(appearance);
+  const look = useMemo(() => appearance, [lookKey]);
+  // the sim runs on performance.now() seconds (see SimDriver)
+  const pose = useCallback(() => {
+    const tw = sim.twins.get(id);
+    return tw ? avatarPose(tw, performance.now() / 1000) : REST_POSE;
+  }, [sim, id]);
 
   useFrame(({ clock }) => {
     const tw = sim.twins.get(id);
     if (!tw || !root.current || !body.current) return;
     root.current.position.set(tw.x, 0, tw.z);
-    body.current.rotation.set(tw.tiltX, tw.yaw + MODEL_YAW, tw.roll);
-    body.current.position.y = tw.bodyY;
-    if (cup.current) {
-      cup.current.visible = tw.cupVisible;
-      cup.current.position.y = 0.58 + tw.cupLift;
-    }
+    body.current.rotation.y = tw.yaw; // the rig animates everything else
+    body.current.position.y = bodyLift(tw);
     if (ring.current) {
       const pulse = 1 + Math.sin(clock.elapsedTime * 2.2 + tw.phase) * 0.12;
       ring.current.scale.set(pulse, pulse, 1);
@@ -150,20 +106,7 @@ export function TwinAvatar({
       }}
     >
       <group ref={body}>
-        <Suspense fallback={<CapsuleBody color={color} />}>
-          <GltfBody url={url} />
-        </Suspense>
-        {/* coffee prop, visible during the café activity */}
-        <group ref={cup} position={[0.2, 0.58, 0.2]} visible={false}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.045, 0.038, 0.09, 12]} />
-            <meshStandardMaterial color={0xfff3e0} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, 0.045, 0]}>
-            <cylinderGeometry args={[0.05, 0.05, 0.012, 12]} />
-            <meshStandardMaterial color={0x6b4a2e} />
-          </mesh>
-        </group>
+        <Avatar appearance={look} pose={pose} />
       </group>
 
       {/* ground ring: twin colour; accent blue + larger when selected */}
@@ -215,4 +158,3 @@ export function TwinAvatar({
   );
 }
 
-for (const u of MODEL_URLS) useGLTF.preload(u);

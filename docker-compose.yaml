@@ -1,0 +1,84 @@
+# AiVillage — your own private village of AI twins.
+#
+#   docker compose up -d          start (first run builds the images)
+#   open http://localhost:3000    play
+#   docker compose down           stop (your village is kept)
+#   docker compose down -v        stop AND delete the village (fresh start)
+#
+# Change ports:  WEB_PORT=3100 API_PORT=4100 docker compose up -d --build
+# (--build is needed when API_PORT changes: the web app has the API address
+#  built in.)
+#
+# AI keys are NOT set here. Choose your AI in the app (Settings page).
+
+name: aivillage
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aivillage
+      POSTGRES_PASSWORD: aivillage
+      POSTGRES_DB: aivillage
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # The database is private to the stack. To reach it from your computer
+    # (e.g. with a SQL client), uncomment the next two lines:
+    # ports:
+    #   - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aivillage -d aivillage"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      DATABASE_URL: postgres://aivillage:aivillage@db:5432/aivillage
+      PORT: "4000"
+      AIV_IN_DOCKER: "1"
+      # Optional: set the AI with environment variables instead of the
+      # Settings page. These are passed through from your shell (or a .env
+      # file next to this file) only when you set them; otherwise they stay
+      # unset. Example:
+      #   LLM_PROVIDER=anthropic LLM_MODEL=claude-haiku-5-5 ANTHROPIC_API_KEY=sk-... docker compose up -d
+      LLM_PROVIDER:
+      LLM_MODEL:
+      ANTHROPIC_API_KEY:
+    # Lets the backend reach Ollama running on your computer
+    # at http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${API_PORT:-4000}:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # The address the BROWSER uses to reach the backend.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-4000}}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Twin } from "@aivillage/shared";
-import { ORDER_HOLD_MS } from "@aivillage/shared";
+import { ORDER_HOLD_MS, ACT_HOLD_MS } from "@aivillage/shared";
 import { parseCommand, applyCommand, commandAck } from "../../src/chat/commands.js";
 
 const VILLAGERS = ["Ravi", "Aiko", "Daniel Park"];
@@ -110,5 +110,84 @@ describe("commandAck", () => {
     expect(commandAck("Memo", { type: "talk_to", targetName: "Ravi" })).toContain("Ravi");
     expect(commandAck("Memo", { type: "stay" }).length).toBeGreaterThan(0);
     expect(commandAck("Memo", { type: "free" }).length).toBeGreaterThan(0);
+  });
+});
+
+describe("parseCommand: actions", () => {
+  it.each([
+    ["jump!", "jump", null],
+    ["please wave", "wave", null],
+    ["can you dance?", "dance", null],
+    ["wash your hands", "wash_hands", null],
+    ["hug Ravi", "hug", "Ravi"],
+    ["give aiko a hug", "hug", "Aiko"],
+    ["kiss Ravi on the cheek", "kiss_cheek", "Ravi"],
+    ["high five Daniel Park", "high_five", "Daniel Park"],
+    ["take a nap", "sleep", null],
+    ["drink coffee", "drink_coffee", null]
+  ])("%s → %s", (msg, action, target) => {
+    expect(parseCommand(msg, VILLAGERS)).toEqual({ type: "act", action, target });
+  });
+
+  it("'tell X …' passes a message on", () => {
+    expect(parseCommand("tell Ravi dinner is ready", VILLAGERS)).toEqual({ type: "talk_to", targetName: "Ravi", message: "dinner is ready" });
+  });
+
+  it("the owner describing their own day is not an order", () => {
+    expect(parseCommand("I will dance tonight", VILLAGERS)).toBeNull();
+    expect(parseCommand("we hugged yesterday", VILLAGERS)).toBeNull();
+  });
+});
+
+describe("applyCommand: act", () => {
+  const feelings = (score: number) => () => score;
+
+  it("a solo action is performed where the twin is", () => {
+    const out = applyCommand(me, { type: "act", action: "jump", target: null }, [me, ravi], NOW);
+    expect(out.changed).toBe(true);
+    expect(out.twin.order).toMatchObject({ kind: "act", zone: "plaza", targetName: null, action: { id: "jump", anim: "jump" } });
+    expect(Date.parse(out.twin.order!.holdUntil) - NOW.getTime()).toBe(ACT_HOLD_MS);
+  });
+
+  it("a placed action walks to its place first (wash hands → the café)", () => {
+    const out = applyCommand(me, { type: "act", action: "wash_hands", target: null }, [me, ravi], NOW);
+    expect(out.twin.order).toMatchObject({ zone: "maker_space", action: { id: "wash_hands" } });
+    expect(out.twin.locationZone).toBe("maker_space");
+  });
+
+  it("a social action goes to the partner, who agrees when they like the twin", () => {
+    const out = applyCommand(me, { type: "act", action: "hug", target: "Ravi" }, [me, ravi], NOW, feelings(30));
+    expect(out.target?.id).toBe("ravi");
+    expect(out.twin.order).toMatchObject({ zone: "event_space", targetName: "Ravi", action: { id: "hug", refused: false } });
+  });
+
+  it("…and refuses when they don't", () => {
+    const out = applyCommand(me, { type: "act", action: "kiss_cheek", target: "Ravi" }, [me, ravi], NOW, feelings(-50));
+    expect(out.twin.order!.action).toMatchObject({ refused: true });
+  });
+
+  it("unsafe or impossible requests change nothing and explain why", () => {
+    const out = applyCommand(me, { type: "act", action: "punch", target: "Ravi" }, [me, ravi], NOW);
+    expect(out.changed).toBe(false);
+    expect(out.refusal).toMatch(/violence/);
+    const fly = applyCommand(me, { type: "act", action: "fly", target: null }, [me, ravi], NOW);
+    expect(fly.changed).toBe(false);
+  });
+
+  it("an unknown action becomes a mime", () => {
+    const out = applyCommand(me, { type: "act", action: "play guitar", target: null, emoji: "🎸" }, [me, ravi], NOW);
+    expect(out.twin.order!.action).toMatchObject({ id: "mime", label: "play guitar", emoji: "🎸" });
+  });
+
+  it("a social action with an unknown partner changes nothing", () => {
+    const out = applyCommand(me, { type: "act", action: "hug", target: "Nobody" }, [me, ravi], NOW);
+    expect(out.changed).toBe(false);
+  });
+});
+
+describe("commandAck: act", () => {
+  it("confirms actions and passes on messages", () => {
+    expect(commandAck("Memo", { type: "act", action: "jump", target: null })).toMatch(/jump/i);
+    expect(commandAck("Memo", { type: "talk_to", targetName: "Ravi", message: "dinner is ready" })).toContain("Ravi");
   });
 });

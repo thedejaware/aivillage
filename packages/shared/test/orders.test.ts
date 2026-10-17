@@ -45,7 +45,7 @@ describe("isOrderActive", () => {
 describe("toWorldState order view", () => {
   it("exposes an active owner order on the twin view", () => {
     const ws = toWorldState({ zones: DEFAULT_ZONES, twins: [twin(order("2026-10-06T12:05:00Z"))], structures: [], now: NOW });
-    expect(ws.twins[0].order).toEqual({ kind: "go", zone: "maker_space", targetName: null, label: "Heading to THE CAFÉ" });
+    expect(ws.twins[0].order).toEqual({ kind: "go", zone: "maker_space", targetName: null, label: "Heading to THE CAFÉ", action: null, issuedAt: "2026-10-06T11:55:00Z" });
   });
   it("hides an expired order", () => {
     const ws = toWorldState({ zones: DEFAULT_ZONES, twins: [twin(order("2026-10-06T11:00:00Z"))], structures: [], now: NOW });
@@ -81,5 +81,19 @@ describe("toWorldState asOf", () => {
   it("stamps the snapshot with the time its data was read", () => {
     const ws = toWorldState({ zones: DEFAULT_ZONES, twins: [twin(null)], structures: [], now: NOW });
     expect(ws.asOf).toBe("2026-10-06T12:00:00.000Z");
+  });
+});
+
+describe("orderStatus for actions", () => {
+  const act = (refused = false) => ({
+    kind: "act" as const, zone: "event_space", targetName: "Ravi", label: "Going to hug Ravi",
+    action: { id: "hug", label: "hug", emoji: "🤗", anim: "hug" as const, seconds: 5, place: null, targetName: "Ravi", refused }
+  });
+  it("walks first, then shows the action", () => {
+    expect(orderStatus(act(), false)).toBe("🚶 Going to hug Ravi");
+    expect(orderStatus(act(), true)).toBe("🤗 hug Ravi");
+  });
+  it("shows a refusal", () => {
+    expect(orderStatus(act(true), true)).toBe("🙅 Ravi said no to a hug");
   });
 });

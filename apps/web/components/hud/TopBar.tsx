@@ -14,13 +14,16 @@ export function TopBar({
   live,
   items,
   onPick,
-  me
+  me,
+  settingsHref
 }: {
   live: boolean;
   items: SearchItem[];
   onPick: (id: string) => void;
   /** the owner's twin, if they have one */
   me: { name: string; colorHex: number } | null;
+  /** link to the Settings page (twins + AI model) */
+  settingsHref?: string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -114,6 +117,19 @@ export function TopBar({
           <span style={{ width: 8, height: 8, borderRadius: 8, background: live ? C.green : C.faint }} />
           {live ? "Live" : "…"} <span style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{clock}</span>
         </span>
+        {settingsHref && (
+          <a
+            href={settingsHref}
+            title="Settings — twins and AI model"
+            aria-label="Settings"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, height: 34, padding: "0 12px", borderRadius: 999,
+              background: C.greySoft, color: C.text, fontSize: 13, fontWeight: 600, textDecoration: "none"
+            }}
+          >
+            ⚙️ <span className="hud-topbar-brand">Settings</span>
+          </a>
+        )}
         {me && (
           <div className="hud-topbar-me" style={{ display: "flex", alignItems: "center", gap: 9, paddingLeft: 12, borderLeft: `1px solid ${C.line}` }}>
             <div

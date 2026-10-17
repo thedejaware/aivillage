@@ -1,0 +1,42 @@
+# Keep the Docker build context small. Each Dockerfile copies only what it needs.
+
+# Dependencies and build output (rebuilt inside the image)
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/drizzle
+**/*.tsbuildinfo
+apps/web/next-env.d.ts
+
+# Git, editors, OS files
+.git
+.gitignore
+**/.DS_Store
+.claude
+.superpowers
+.vscode
+.idea
+_tmp_*
+
+# Secrets — keys never go into an image
+**/.env
+**/.env.*
+
+# Logs
+**/*.log
+**/npm-debug.log*
+**/pnpm-debug.log*
+
+# Not needed to run the app
+docs
+art
+**/test
+**/coverage
+**/vitest.config.ts
+README.md
+docker-compose.yaml
+**/Dockerfile
+.dockerignore
+
+# Keep: apps/web/public (3D models, world.json) — it is NOT ignored.

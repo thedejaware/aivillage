@@ -2,9 +2,10 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 import { ZONE_DISPLAY, orderStatus } from "@aivillage/shared";
-import type { WorldState, WorldTwinView, Twin, Memory, Approval, TwinDetail } from "@aivillage/shared";
+import type { WorldState, WorldTwinView, Twin, Memory, Approval, TwinDetail, VillageInfo } from "@aivillage/shared";
 import { zoneOfTile } from "../lib/village/layout";
 import { TopBar } from "../components/hud/TopBar";
 import { StatCards } from "../components/hud/StatCards";
@@ -32,7 +33,7 @@ interface Caption {
 const hexColor = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
 /** Reading time scaled to line length: 2s floor, 7s ceiling. */
 const captionDur = (text: string) => Math.min(7000, Math.max(2000, 1200 + text.length * 45));
-const orderKeyOf = (o: WorldTwinView["order"]) => (o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}` : "");
+const orderKeyOf = (o: WorldTwinView["order"]) => (o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}:${o.issuedAt ?? ""}` : "");
 
 interface Panel {
   twin: Twin | null;
@@ -66,13 +67,15 @@ function approvalText(a: Approval): React.ReactNode {
 }
 
 export default function Page() {
+  const router = useRouter();
   const [state, setState] = useState<WorldState | null>(null);
   const [live, setLive] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [myTwinId, setMyTwinId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
-  const [form, setForm] = useState({ name: "", personality: "", goal: "" });
-  const [creating, setCreating] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState(true);
+  /** the local owner (no login: one person's village) */
+  const ownerRef = useRef<string | null>(null);
   const [caption, setCaption] = useState<Caption | null>(null);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [chatEvent, setChatEvent] = useState<{ id: string; text: string } | null>(null);
@@ -111,7 +114,7 @@ export default function Page() {
   });
 
   const refreshPanel = useCallback(async () => {
-    const uid = localStorage.getItem("aiv.userId");
+    const uid = ownerRef.current;
     if (!uid) return;
     try {
       const r = await fetch(`${API}/api/me?userId=${encodeURIComponent(uid)}`);
@@ -124,7 +127,7 @@ export default function Page() {
   const loadDetail = useCallback(async (id: string, quiet = false) => {
     if (!quiet) setDetailLoading(true);
     try {
-      const viewer = localStorage.getItem("aiv.userId");
+      const viewer = ownerRef.current;
       const r = await fetch(`${API}/api/twins/${encodeURIComponent(id)}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`);
       if (r.ok) setDetail((await r.json()) as TwinDetail);
     } catch {
@@ -134,10 +137,28 @@ export default function Page() {
     }
   }, []);
 
+  // Who am I here? The local owner and their active main twin. No main twin yet → first-run setup.
   useEffect(() => {
-    setUserId(localStorage.getItem("aiv.userId"));
-    setMyTwinId(localStorage.getItem("aiv.twinId"));
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/api/village`);
+        const v = (await r.json()) as VillageInfo;
+        if (cancelled) return;
+        if (!v.mainTwinId) {
+          router.replace("/setup");
+          return;
+        }
+        ownerRef.current = v.ownerId;
+        setUserId(v.ownerId);
+        setMyTwinId(v.mainTwinId);
+        setAiConfigured(v.aiConfigured);
+      } catch {
+        /* backend not up yet — the "Connecting…" screen stays */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
 
   useEffect(() => {
     if (userId) refreshPanel();
@@ -217,7 +238,8 @@ export default function Page() {
 
   // ---- my twin + its order ----
   const myView = state?.twins.find((t) => t.id === myTwinId) ?? null;
-  const myOrder = myView?.order ?? null;
+  // only the player's own orders — not actions the twin's AI picked by itself
+  const myOrder = myView?.order && !myView.order.auto ? myView.order : null;
   const myOrderKey = orderKeyOf(myOrder);
   const myOrderRef = useRef(myOrder);
   myOrderRef.current = myOrder;
@@ -240,7 +262,7 @@ export default function Page() {
 
   const onOrderArrive = useCallback(
     (twinId: string, status: string) => {
-      if (twinId !== myTwinId) return;
+      if (twinId !== myTwinId || !myOrderRef.current) return;
       const key = orderKeyOf(myOrderRef.current);
       if (key === arrivedKeyRef.current) return; // a remounted scene re-reports the same arrival
       arrivedKeyRef.current = key;
@@ -262,27 +284,6 @@ export default function Page() {
     setSelectedId(id);
     if (id && focus) setFocusRequest((f) => ({ id, n: (f?.n ?? 0) + 1 }));
   }, []);
-
-  const createTwin = async () => {
-    if (!form.name.trim()) return;
-    setCreating(true);
-    try {
-      const r = await fetch(`${API}/api/twins`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(form)
-      });
-      const data = (await r.json()) as { userId?: string; twinId?: string; error?: string };
-      if (data.userId) {
-        localStorage.setItem("aiv.userId", data.userId);
-        localStorage.setItem("aiv.twinId", data.twinId ?? "");
-        setUserId(data.userId);
-        setMyTwinId(data.twinId ?? null);
-      }
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const resolveApproval = async (id: string, approve: boolean) => {
     await fetch(`${API}/api/approvals/${id}/resolve`, {
@@ -308,7 +309,7 @@ export default function Page() {
             name: t.name,
             colorHex: t.colorHex,
             zoneLabel: ZONE_DISPLAY[zoneOfTile(t.col, t.row)] ?? "",
-            status: speaking ? "💬 Talking" : t.order ? orderStatus(t.order, arrived) : "Roaming",
+            status: speaking ? "💬 Talking" : t.order ? orderStatus(t.order, arrived || !!t.order.auto) : "Roaming",
             tone: speaking ? ("blue" as const) : t.order ? ("amber" as const) : ("grey" as const),
             isMine,
             popularity: popularity.get(t.id)
@@ -365,7 +366,20 @@ export default function Page() {
         items={(state?.twins ?? []).map((t) => ({ id: t.id, name: t.name, colorHex: t.colorHex, sub: ZONE_DISPLAY[zoneOfTile(t.col, t.row)] ?? "" }))}
         onPick={(id) => select(id, true)}
         me={myView ? { name: myView.name, colorHex: myView.colorHex } : null}
+        settingsHref="/settings"
       />
+
+      {!aiConfigured && (
+        <a
+          href="/settings?tab=ai"
+          style={{
+            position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: Z.card + 1,
+            padding: "8px 14px", ...card, fontSize: 13, color: C.text, textDecoration: "none"
+          }}
+        >
+          🤖 No AI model yet — twins only follow simple orders. <b style={{ color: C.blue }}>Choose your AI →</b>
+        </a>
+      )}
 
       <StatCards stats={stats} style={{ top: 80 }} />
 
@@ -425,50 +439,6 @@ export default function Page() {
 
       <VillagerList villagers={villagers} selectedId={selectedId} onSelect={(id) => select(id, true)} />
 
-      {/* ---- onboarding ---- */}
-      {!userId && (
-        <div
-          style={{
-            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: Z.overlay,
-            width: "min(380px, calc(100vw - 32px))", padding: 22, ...card
-          }}
-        >
-          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Create your twin</div>
-          <div style={{ color: C.muted, fontSize: 13.5, lineHeight: 1.5, marginBottom: 16 }}>
-            It will live among the others — making friends, rivals and drama. Talk to it, send it places, and it asks you before its big moves.
-          </div>
-          <input placeholder="Name (e.g. Memo)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
-          <input
-            placeholder="Personality (e.g. charming gossip)"
-            value={form.personality}
-            onChange={(e) => setForm({ ...form, personality: e.target.value })}
-            style={inputStyle}
-          />
-          <input
-            placeholder="Goal (e.g. become the most loved in the village)"
-            value={form.goal}
-            onChange={(e) => setForm({ ...form, goal: e.target.value })}
-            style={inputStyle}
-          />
-          <button
-            onClick={createTwin}
-            disabled={creating || !form.name.trim()}
-            style={{
-              width: "100%", height: 42, marginTop: 4, border: "none", borderRadius: 10, background: C.blue, color: "#fff",
-              fontSize: 14, fontWeight: 600, cursor: creating || !form.name.trim() ? "default" : "pointer",
-              opacity: creating || !form.name.trim() ? 0.55 : 1
-            }}
-          >
-            {creating ? "Creating…" : "✨ Enter the village"}
-          </button>
-        </div>
-      )}
     </main>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%", height: 40, marginBottom: 10, padding: "0 12px",
-  background: "#f6f8fc", border: `1px solid ${C.line}`, borderRadius: 10,
-  color: C.text, fontSize: 13.5, outline: "none"
-};
