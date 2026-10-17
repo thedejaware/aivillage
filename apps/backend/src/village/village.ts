@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, or } from "drizzle-orm";
 import {
-  MAX_TWINS, validateAppearance, DAILY_ENERGY,
+  MAX_TWINS, validateAppearance, DAILY_ENERGY, MAX_STAMINA, LAYOUT_VERSION, DEFAULT_ZONES,
   type Appearance, type Twin, type TwinRole, type TwinSummary, type VillageInfo
 } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
 import { users, twins, memories, relationships, chatMessages, approvals, structures } from "../db/schema.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleSettingsRepository } from "../db/settingsRepository.js";
+import { clearQueuedSteps } from "../sim/stepQueue.js";
 
 /**
  * The local village: one owner (no login — it's one person's app), up to
@@ -105,7 +106,8 @@ export async function createTwin(db: DB, input: NewTwin): Promise<Twin> {
     appearance: validateAppearance(input.appearance),
     role: isMain ? "main" : "villager",
     active,
-    pose: null
+    pose: null,
+    stamina: MAX_STAMINA
   };
   await repo.save(twin);
   return twin;
@@ -142,6 +144,7 @@ export async function deactivateTwin(db: DB, id: string): Promise<Twin> {
   const t = await mustGet(db, id);
   const updated: Twin = { ...t, active: false, order: null };
   await new DrizzleTwinRepository(db).save(updated);
+  clearQueuedSteps(id);
   return updated;
 }
 
@@ -152,7 +155,10 @@ export async function activateTwin(db: DB, id: string): Promise<Twin> {
   if (t.active) return t;
   if (t.role === "main") {
     for (const other of await repo.listAll()) {
-      if (other.role === "main") await repo.save({ ...other, active: false, order: null });
+      if (other.role === "main") {
+        await repo.save({ ...other, active: false, order: null });
+        clearQueuedSteps(other.id);
+      }
     }
   }
   await assertRoom(db);
@@ -172,16 +178,26 @@ export async function deleteTwin(db: DB, id: string): Promise<void> {
     await tx.update(structures).set({ builtByTwinId: null }).where(eq(structures.builtByTwinId, id));
     await tx.delete(twins).where(and(eq(twins.id, id)));
   });
+  clearQueuedSteps(id);
 }
 
-/** The browser saves where everyone is, so the village resumes exactly there. Unknown ids are ignored. */
+/**
+ * The browser saves where everyone is, so the village resumes exactly there. Unknown ids are ignored.
+ * Only the pose (and venue) columns are written, so energy and orders changed meanwhile survive.
+ * A venue name the map doesn't know keeps the twin's current venue.
+ */
 export async function savePoses(db: DB, poses: { id: string; x: number; z: number; yaw: number; zone: string }[]): Promise<void> {
   const repo = new DrizzleTwinRepository(db);
   const byId = new Map((await repo.listAll()).map((t) => [t.id, t]));
+  const known = new Set(DEFAULT_ZONES.map((z) => z.name));
   const finite = (n: unknown) => typeof n === "number" && Number.isFinite(n);
   for (const p of poses) {
     const t = byId.get(p.id);
     if (!t || !finite(p.x) || !finite(p.z) || !finite(p.yaw) || typeof p.zone !== "string") continue;
-    await repo.save({ ...t, pose: { x: p.x, z: p.z, yaw: p.yaw, zone: p.zone }, locationZone: p.zone });
+    const zone = known.has(p.zone) ? p.zone : t.locationZone;
+    await db
+      .update(twins)
+      .set({ pose: { x: p.x, z: p.z, yaw: p.yaw, zone, layout: LAYOUT_VERSION }, locationZone: zone })
+      .where(eq(twins.id, t.id));
   }
 }

@@ -1,14 +1,20 @@
 // --- What a twin can DO: a real-life action catalogue + free "mime" actions, under rules ---
+import { placeOf } from "./places.js";
 
 /** Body animations the renderer knows how to play. */
 export const BODY_ANIMS = [
   "idle", "talk", "jump", "wave", "dance", "sit", "sleep", "clap", "point", "cheer", "stretch",
   "laugh", "cry", "think", "wash", "eat", "drink", "read", "phone", "sweep", "water", "exercise",
-  "hug", "kiss", "highfive", "handshake"
+  "hug", "kiss", "highfive", "handshake",
+  // Main Street places
+  "swim", "bike", "run", "lift", "dig", "watch", "ride"
 ] as const;
 export type BodyAnim = (typeof BODY_ANIMS)[number];
 
 export type ActionKind = "self" | "social" | "chore";
+
+/** Something the twin holds while doing it (the avatar draws it). */
+export type ActionItem = "juice" | "plate" | "popcorn" | "basket" | "dumbbell";
 
 export interface ActionDef {
   id: string;
@@ -26,17 +32,20 @@ export interface ActionDef {
   seconds: number;
   /** extra names people use for it */
   aliases?: string[];
+  /** something held while doing it */
+  item?: ActionItem;
 }
 
 const a = (
   id: string, label: string, emoji: string, kind: ActionKind, anim: BodyAnim, seconds: number,
-  opts: { target?: boolean; consentMin?: number | null; place?: string | null; aliases?: string[] } = {}
+  opts: { target?: boolean; consentMin?: number | null; place?: string | null; aliases?: string[]; item?: ActionItem } = {}
 ): ActionDef => ({
   id, label, emoji, kind, anim, seconds,
   target: opts.target ?? false,
   consentMin: opts.consentMin ?? null,
   place: opts.place ?? null,
-  aliases: opts.aliases
+  aliases: opts.aliases,
+  ...(opts.item ? { item: opts.item } : {})
 });
 
 export const ACTIONS: ActionDef[] = [
@@ -45,7 +54,7 @@ export const ACTIONS: ActionDef[] = [
   a("wave", "wave", "👋", "self", "wave", 4, { aliases: ["greet"] }),
   a("dance", "dance", "💃", "self", "dance", 8),
   a("sit", "sit down", "🪑", "self", "sit", 20, { aliases: ["sit", "take a seat"] }),
-  a("sleep", "take a nap", "😴", "self", "sleep", 25, { aliases: ["nap", "sleep", "rest"] }),
+  a("sleep", "sleep at home", "😴", "self", "sleep", 150, { aliases: ["nap", "sleep", "take a nap", "go to sleep", "go to bed", "go home", "rest at home"], place: "home" }),
   a("clap", "clap", "👏", "self", "clap", 4, { aliases: ["applaud"] }),
   a("point", "point", "👉", "self", "point", 4),
   a("cheer", "cheer", "🙌", "self", "cheer", 5, { aliases: ["celebrate"] }),
@@ -53,16 +62,26 @@ export const ACTIONS: ActionDef[] = [
   a("laugh", "laugh", "😂", "self", "laugh", 5),
   a("cry", "cry", "😢", "self", "cry", 6, { aliases: ["sob"] }),
   a("think", "think", "🤔", "self", "think", 6, { aliases: ["ponder"] }),
-  a("exercise", "exercise", "🏋️", "self", "exercise", 10, { aliases: ["work out", "do push ups", "train"], place: "event_space" }),
+  a("exercise", "exercise", "🤸", "self", "exercise", 10, { aliases: ["do push ups", "stretch out"], place: "event_space" }),
   // ---- daily life ----
   a("wash_hands", "wash hands", "🧼", "self", "wash", 6, { aliases: ["wash your hands"], place: "maker_space" }),
-  a("eat", "eat something", "🍽️", "self", "eat", 12, { aliases: ["eat", "have lunch", "have dinner", "have breakfast"], place: "maker_space" }),
-  a("drink_coffee", "drink coffee", "☕", "self", "drink", 12, { aliases: ["coffee", "drink", "have a coffee", "drink tea"], place: "maker_space" }),
-  a("read", "read a book", "📖", "self", "read", 15, { aliases: ["read"], place: "network_hub" }),
+  a("eat", "eat something", "🍽️", "self", "eat", 60, { aliases: ["eat", "have lunch", "have dinner", "have breakfast", "eat at the cafe", "eat at the café"], place: "maker_space", item: "plate" }),
+  a("drink_coffee", "drink coffee", "☕", "self", "drink", 60, { aliases: ["coffee", "drink", "have a coffee", "drink tea"], place: "maker_space" }),
+  a("drink_juice", "drink fresh juice", "🧃", "self", "drink", 40, { aliases: ["juice", "make juice", "drink juice", "have a juice"], place: "maker_space", item: "juice" }),
+  a("read", "read a book", "📖", "self", "read", 90, { aliases: ["read", "relax", "rest", "sit quietly"], place: "network_hub" }),
   a("phone_call", "make a phone call", "📱", "self", "phone", 10, { aliases: ["call", "phone"] }),
   a("sweep", "sweep the floor", "🧹", "chore", "sweep", 10, { aliases: ["sweep", "clean"] }),
   a("water_plants", "water the plants", "🪴", "chore", "water", 10, { aliases: ["water", "garden"], place: "event_space" }),
   a("sing", "sing", "🎤", "self", "cheer", 8, { aliases: ["perform"], place: "plaza" }),
+  // ---- Main Street places ----
+  a("swim", "swim", "🏊", "self", "swim", 90, { aliases: ["go swimming", "swimming", "go to the pool", "have a swim"], place: "pool" }),
+  a("sunbathe", "sunbathe by the pool", "😎", "self", "sit", 70, { aliases: ["sunbathe", "lie in the sun", "relax by the pool"], place: "pool" }),
+  a("work_out", "work out", "🏋️", "self", "lift", 80, { aliases: ["work out", "workout", "lift weights", "go to the gym", "train", "gym"], place: "gym", item: "dumbbell" }),
+  a("run", "run on the treadmill", "🏃", "self", "run", 70, { aliases: ["run", "jog", "go running", "treadmill"], place: "gym" }),
+  a("ride_bike", "ride a bike", "🚲", "self", "bike", 80, { aliases: ["ride a bike", "bike", "cycle", "go cycling", "bike ride", "ride bikes"], place: "bike_rack" }),
+  a("watch_movie", "watch a movie", "🎬", "self", "watch", 150, { aliases: ["watch a movie", "watch a film", "movie", "go to the cinema", "cinema", "see a movie"], place: "cinema", item: "popcorn" }),
+  a("ride_coaster", "ride the rollercoaster", "🎢", "self", "ride", 60, { aliases: ["ride the rollercoaster", "rollercoaster", "roller coaster", "ride the roller coaster", "coaster", "go to the funfair", "lunapark"], place: "funfair" }),
+  a("garden", "work in the garden", "🥕", "chore", "dig", 80, { aliases: ["pick vegetables", "garden", "gardening", "plant vegetables", "grow vegetables", "harvest"], place: "garden", item: "basket" }),
   // ---- with someone ----
   a("hug", "hug", "🤗", "social", "hug", 5, { target: true, consentMin: 0, aliases: ["cuddle", "embrace"] }),
   a("kiss_cheek", "kiss on the cheek", "😘", "social", "kiss", 4, { target: true, consentMin: 30, aliases: ["kiss", "kiss cheek", "cheek kiss"] }),
@@ -99,7 +118,9 @@ export function checkSafety(text: string): { ok: true } | { ok: false; reason: s
 
 /** Does the other twin agree? `feeling` = how the TARGET feels about the actor. */
 export function consentGiven(action: ActionDef, feeling: number): boolean {
-  return action.consentMin === null || feeling >= action.consentMin;
+  // a place activity done together ("take Sena to the cinema") is an invitation
+  const min = action.consentMin ?? (!action.target && placeOf(action.place) ? INVITE_CONSENT_MIN : null);
+  return min === null || feeling >= min;
 }
 
 /** An action as it will be performed (catalogue entry or mime). */
@@ -113,6 +134,8 @@ export interface PerformedAction {
   targetName: string | null;
   /** the target refused (touch without consent) */
   refused?: boolean;
+  /** something held while doing it */
+  item?: ActionItem;
 }
 
 /** For mimes: pick the closest body animation by keyword. */
@@ -124,6 +147,21 @@ const MIME_ANIMS: [RegExp, BodyAnim][] = [
   [/meditat|pray|wait|relax/, "sit"],
   [/sing|shout|celebrat/, "cheer"]
 ];
+
+/** Energy effect of doing this action (its place's effect; juice +10; anywhere-actions 0). */
+export function staminaDelta(action: { id: string; place: string | null }): number {
+  if (action.id === "drink_juice" || action.id === "sunbathe") return 10;
+  if (action.id === "sleep") return 0; // the house refills instead (applyStamina)
+  return placeOf(action.place)?.stamina ?? 0;
+}
+
+/** How long an action order holds the twin: the activity plus time to walk there. */
+export function actHoldMs(action: { seconds: number }): number {
+  return (action.seconds + 40) * 1000;
+}
+
+/** Someone invited along to a place ("take Sena to the cinema") agrees from this feeling up. */
+export const INVITE_CONSENT_MIN = -10;
 
 export function resolveAction(input: {
   action: string;
@@ -139,11 +177,14 @@ export function resolveAction(input: {
   const targetName = input.target?.trim() || null;
   if (def) {
     if (def.target && !targetName) return { ok: false, reason: `who should I ${def.label} with?` };
+    // place activities can be shared: "take Sena to the cinema"
+    const keepPartner = def.target || (def.place !== null && placeOf(def.place) !== undefined);
     return {
       ok: true,
       action: {
         id: def.id, label: def.label, emoji: def.emoji, anim: def.anim, seconds: def.seconds,
-        place: def.place, targetName: def.target ? targetName : null
+        place: def.place, targetName: keepPartner ? targetName : null,
+        ...(def.item ? { item: def.item } : {})
       }
     };
   }

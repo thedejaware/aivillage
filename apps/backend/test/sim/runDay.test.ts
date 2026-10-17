@@ -2,23 +2,27 @@
  * Integration tests for runDay: venue-routing behaviour.
  *
  * Twins physically move to the venue that matches their action:
- *   chat    → maker_space  (THE CAFE,  col 0, row 5)
- *   bond    → event_space  (THE LAWN,  col 6, row 6)
- *   bigmove → plaza        (THE STAGE, col 3, row 3)
- *   scheme  → network_hub  (QUIET CORNER, col 6, row 0)
+ *   chat    → maker_space  (THE CAFE,  col -1, row 6)
+ *   bond    → event_space  (THE LAWN,  col 7, row 8)
+ *   bigmove → plaza        (THE STAGE, col 4, row 1)
+ *   scheme  → network_hub  (QUIET CORNER, col -4, row -2)
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { runDay } from "../../src/sim/runDay.js";
 import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
-import { ACT_HOLD_MS } from "@aivillage/shared";
+import { actHoldMs, findAction, DEFAULT_ZONES, type LlmClient } from "@aivillage/shared";
 
 // ─── zone centres (from DEFAULT_ZONES in world.ts) ───────────────────────────
-const PLAZA       = { col: 3, row: 3 };
-const MAKER_SPACE = { col: 0, row: 5 };
-const NETWORK_HUB = { col: 6, row: 0 };
-const EVENT_SPACE = { col: 6, row: 6 };
+const zoneAt = (name: string) => {
+  const z = DEFAULT_ZONES.find((zz) => zz.name === name)!;
+  return { col: z.col, row: z.row };
+};
+const PLAZA       = zoneAt("plaza");
+const MAKER_SPACE = zoneAt("maker_space");
+const NETWORK_HUB = zoneAt("network_hub");
+const EVENT_SPACE = zoneAt("event_space");
 
 // ─── tolerance for fractional offsets ────────────────────────────────────────
 const NEAR = 2.5; // allow ±2.5 tiles from zone centre
@@ -82,7 +86,7 @@ describe("runDay venue routing", () => {
       expect(twinA).toBeDefined();
       expect(twinB).toBeDefined();
 
-      // Both should be near maker_space (col 0, row 5)
+      // Both should be near maker_space
       near(twinA.col, MAKER_SPACE.col);
       near(twinA.row, MAKER_SPACE.row);
       near(twinB.col, MAKER_SPACE.col);
@@ -320,7 +324,7 @@ describe("runDay: autonomous actions", () => {
       expect(saved?.locationZone).toBe("maker_space");
       const hold = Date.parse(saved!.order!.holdUntil) - before;
       expect(hold).toBeGreaterThan(30_000);
-      expect(hold).toBeLessThanOrEqual(ACT_HOLD_MS + 5_000);
+      expect(hold).toBeLessThanOrEqual(actHoldMs(findAction("drink_coffee")!) + 5_000);
     } finally {
       await tdb.stop();
     }
@@ -360,4 +364,85 @@ describe("runDay: autonomous actions", () => {
       await tdb.stop();
     }
   }, 60_000);
+});
+
+// ─── Main Street: energy, busy twins, conversations at calm places ───────────
+describe("runDay: places and energy", () => {
+  let tdb: TestDb;
+  // @ts-expect-error drizzle exposes raw client via session.client
+  const sql = () => tdb.db.session.client as { unsafe: (q: string) => Promise<{ id: string }[]> };
+  beforeAll(async () => { tdb = await startTestDb(); });
+  afterAll(async () => { await tdb.stop(); });
+  beforeEach(async () => { await sql().unsafe(`delete from memories; delete from relationships; delete from twins;`); });
+
+  const autoAt = (zone: string, action: string) => JSON.stringify({
+    kind: "act", auto: true, zone, targetName: null, label: action,
+    issuedAt: new Date().toISOString(), holdUntil: new Date(Date.now() + 5 * 60_000).toISOString(),
+    action: { id: action, label: action, emoji: "x", anim: "sit", seconds: 60, place: zone, targetName: null }
+  });
+  const add = async (name: string, zone: string, order: string | null = null, stamina = 100) =>
+    (await sql().unsafe(
+      `insert into twins (name, is_npc, energy, location_zone, owner_order, stamina)
+       values ('${name}', true, 10, '${zone}', ${order ? `'${order}'::jsonb` : "null"}, ${stamina}) returning id`
+    ))[0].id;
+
+  it("a conversation with a twin eating at the café happens there and does not move it", async () => {
+    const a = await add("Walker", "plaza");
+    const b = await add("Eater", "maker_space", autoAt("maker_space", "eat"));
+    const llm = new CannedLlmClient([mkChat("Walker", "Eater"), mkConvo("Walker", "Eater")]);
+    const { frames } = await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
+    const eater = frames[0].twins.find((t) => t.name === "Eater")!;
+    const walker = frames[0].twins.find((t) => t.name === "Walker")!;
+    expect({ col: eater.col, row: eater.row }).toEqual(MAKER_SPACE);
+    near(walker.col, MAKER_SPACE.col);
+    near(walker.row, MAKER_SPACE.row);
+    const saved = await new DrizzleTwinRepository(tdb.db).getById(b);
+    expect(saved).toMatchObject({ locationZone: "maker_space", order: { zone: "maker_space", action: { id: "eat" } } });
+    expect((await new DrizzleTwinRepository(tdb.db).getById(a))!.locationZone).toBe("maker_space");
+  });
+
+  it("busy twins (swimming, riding…) are not offered as conversation partners", async () => {
+    const a = await add("Talker", "plaza");
+    await add("Swimmer", "pool", autoAt("pool", "swim"));
+    await add("Idler", "event_space");
+    const prompts: string[] = [];
+    const llm: LlmClient = {
+      generate: async (p: string) => {
+        prompts.push(p);
+        return mkScheme("Talker");
+      }
+    };
+    await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
+    expect(prompts[0]).toContain("Idler");
+    expect(prompts[0]).not.toContain("Swimmer");
+  });
+
+  it("…and a chat aimed at a busy twin does not drag it out of the pool", async () => {
+    const a = await add("Pest", "plaza");
+    const b = await add("Diver", "pool", autoAt("pool", "swim"));
+    const llm = new CannedLlmClient([mkChat("Pest", "Diver"), mkConvo("Pest", "Diver")]);
+    await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
+    expect((await new DrizzleTwinRepository(tdb.db).getById(b))!.locationZone).toBe("pool");
+    expect((await new DrizzleTwinRepository(tdb.db).getById(a))!.locationZone).not.toBe("pool");
+  });
+
+  it("an act beat spends energy and holds for the activity's own length", async () => {
+    const a = await add("Swim", "plaza", null, 70);
+    const llm = new CannedLlmClient([JSON.stringify({ verb: "act", target: null, kind: null, action: "swim", narrative: "Swim dives in." })]);
+    const before = Date.now();
+    await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
+    const saved = (await new DrizzleTwinRepository(tdb.db).getById(a))!;
+    expect(saved).toMatchObject({ stamina: 45, locationZone: "pool", order: { zone: "pool", action: { id: "swim" } } });
+    expect(Date.parse(saved.order!.holdUntil) - before).toBeLessThanOrEqual(actHoldMs(findAction("swim")!) + 5_000);
+    expect(Date.parse(saved.order!.holdUntil) - before).toBeGreaterThan(actHoldMs(findAction("swim")!) - 5_000);
+  });
+
+  it("a place activity with a partner happens at the place, not where the partner is", async () => {
+    const a = await add("Fan", "plaza");
+    const b = await add("Buddy", "network_hub");
+    await sql().unsafe(`insert into relationships (from_twin_id, to_twin_id, score) values ('${b}', '${a}', 20)`);
+    const llm = new CannedLlmClient([JSON.stringify({ verb: "act", target: "Buddy", kind: null, action: "watch_movie", narrative: "Fan takes Buddy to the cinema." })]);
+    await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
+    expect((await new DrizzleTwinRepository(tdb.db).getById(a))!.order).toMatchObject({ zone: "cinema", targetName: "Buddy" });
+  });
 });

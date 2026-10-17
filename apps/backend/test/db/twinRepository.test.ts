@@ -87,4 +87,21 @@ describe("DrizzleTwinRepository", () => {
     expect(got!.energy).toBe(1);
     expect(got!.locationZone).toBe("plaza");
   });
+
+  it("persists stamina (energy 0–100)", async () => {
+    const id = "77777777-7777-7777-7777-777777777777";
+    await repo.save({ ...newTwin(id), stamina: 35 });
+    expect((await repo.getById(id))!.stamina).toBe(35);
+    await repo.save({ ...newTwin(id), stamina: 80 });
+    expect((await repo.listAll()).find((t) => t.id === id)!.stamina).toBe(80);
+  });
+
+  it("old rows without stamina read as fully rested (100)", async () => {
+    // @ts-expect-error underlying client
+    const [row] = await tdb.db.session.client.unsafe(`insert into twins (name) values ('Old') returning id`);
+    expect((await repo.getById(row.id))!.stamina).toBe(100);
+    const id = "88888888-8888-8888-8888-888888888888";
+    await repo.save(newTwin(id)); // a Twin object without stamina
+    expect((await repo.getById(id))!.stamina).toBe(100);
+  });
 });

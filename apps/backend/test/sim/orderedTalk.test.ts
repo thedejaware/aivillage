@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { DEFAULT_ZONES } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { talkOnArrival } from "../../src/sim/orderedTalk.js";
@@ -44,10 +45,11 @@ describe("talkOnArrival", () => {
       return speaker?.name;
     });
     expect(says).toEqual(["Memo", "Ravi", "Memo"]);
-    // both stand at THE LAWN (event_space = col 6, row 6)
+    // both stand at THE LAWN (event_space)
+    const lawn = DEFAULT_ZONES.find((z) => z.name === "event_space")!;
     for (const t of frames[0].twins) {
-      expect(Math.abs(t.col - 6)).toBeLessThanOrEqual(1.5);
-      expect(Math.abs(t.row - 6)).toBeLessThanOrEqual(1.5);
+      expect(Math.abs(t.col - lawn.col)).toBeLessThanOrEqual(1.5);
+      expect(Math.abs(t.row - lawn.row)).toBeLessThanOrEqual(1.5);
     }
   });
 

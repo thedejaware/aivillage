@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, ACTIONS, labelFor } from "@aivillage/shared";
+import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, ACTIONS, MAX_STAMINA, TIRED_BELOW, labelFor, placeOf } from "@aivillage/shared";
 import type { Twin, Memory, LlmClient, LlmTool, ToolTurn, TwinCommand, OwnerOrder, PerformedAction } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
 import { getDb } from "../db/appDb.js";
@@ -8,6 +8,8 @@ import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
 import { DrizzleChatRepository, type ChatMessage } from "../db/chatRepository.js";
 import { normalizeZone, parseCommand, applyCommand, commandAck } from "./commands.js";
+import { staminaAfter, staminaOf } from "../sim/activity.js";
+import { clearQueuedSteps } from "../sim/stepQueue.js";
 
 export { normalizeZone };
 
@@ -56,7 +58,7 @@ function contextLines(twin: Twin, ctx: ChatContext, message: string): string[] {
     `Your current goals in the village: ${twin.goals.join(", ") || "none yet — ask your owner what matters to them"}.`,
     `THE VILLAGE MAP (you know every corner of it). Venues (zone id = name):`,
     map,
-    `You are currently at ${ZONE_DISPLAY[ctx.myZone] ?? ctx.myZone}.`,
+    `You are currently at ${ZONE_DISPLAY[ctx.myZone] ?? ctx.myZone}. Your energy: ${twin.stamina ?? MAX_STAMINA}/100 (below ${TIRED_BELOW} you are tired and need rest).`,
     `Who is where right now:`,
     people,
     `Your recent village life:\n${life}`,
@@ -121,6 +123,9 @@ export function buildChatTools(villagerNames: string[]): LlmTool[] {
       name: "do_action",
       description:
         `Do something with your body, right now. Known actions: ${ACTIONS.map((a) => a.id).join(", ")}. ` +
+        "Place activities (swim, sunbathe, work_out, run, ride_bike, watch_movie, ride_coaster, garden, drink_juice, eat, drink_coffee, read, sleep…) walk you to their place first. " +
+        "For a place activity you can invite a villager along as the target (\"take Sena to the cinema\" = watch_movie with target Sena); they may say no. " +
+        "Tiring activities (gym, pool, bikes, rollercoaster…) use energy; when you are tired you will rest first. " +
         "Social ones (hug, kiss_cheek, high_five, handshake, dance_together) need a target villager, who may refuse if they don't like you. " +
         "For anything else a person can really do (e.g. 'play guitar'), pass a short action text and an emoji — it will be mimed. " +
         "Never: violence, anything sexual (kisses are on the cheek only), flying, teleporting or leaving the village.",
@@ -128,7 +133,7 @@ export function buildChatTools(villagerNames: string[]): LlmTool[] {
         type: "object",
         properties: {
           action: { type: "string", description: "an action id from the list, or a short free action" },
-          target: { type: "string", enum: villagerNames, description: "the villager to do it with (social actions)" },
+          target: { type: "string", enum: villagerNames, description: "the villager to do it with (social actions) or to invite along to a place activity" },
           emoji: { type: "string", description: "one emoji for a free action" }
         },
         required: ["action"]
@@ -317,12 +322,16 @@ export async function chatWithTwin(
   let worldChanged = false;
   let targetTwinId: string | null = null;
   let refusal: string | undefined;
+  /** what the twin must say no matter what the model said (too tired, a declined invitation) */
+  let forcedReply: string | undefined;
   if (command) {
     // touch needs consent: how does each villager feel about this twin?
     const feelingTowardMe = new Map((await relRepo.listAll()).filter((r) => r.toTwinId === twin.id).map((r) => [r.fromTwinId, r.score]));
     const applied = applyCommand(updated, command, all, now(), (id) => feelingTowardMe.get(id) ?? 0);
     refusal = applied.refusal;
+    forcedReply = applied.reply;
     if (applied.changed) {
+      clearQueuedSteps(twin.id); // the owner's word replaces the twin's own plan
       updated = applied.twin;
       targetTwinId = applied.target?.id ?? null;
       worldChanged = true;
@@ -335,12 +344,24 @@ export async function chatWithTwin(
         });
       }
       if (order?.kind === "act" && order.action && applied.target) {
-        await recordSocialAction(twin, applied.target, order.action, relRepo, memRepo, now());
+        if (placeOf(order.action.place)) await bringAlong(updated, applied.target, order, twinRepo, relRepo, memRepo, now());
+        else await recordSocialAction(twin, applied.target, order.action, relRepo, memRepo, now());
+      }
+      if (order?.action && applied.declinedBy) {
+        const no = applied.declinedBy;
+        forcedReply = `${no.name} doesn't want to come — I'll ${order.action.label} on my own.`;
+        await relRepo.applyDelta(twin.id, no.id, -2);
+        const line = `${no.name} said no when ${twin.name} asked them to ${order.action.label} together.`;
+        for (const twinId of [twin.id, no.id]) {
+          await memRepo.append({ id: randomUUID(), twinId, kind: "act", content: line, importance: 1, createdAt: now().toISOString() });
+        }
       }
     }
   }
 
-  const reply = refusal
+  const reply = forcedReply
+    ? forcedReply
+    : refusal
     ? `Hmm… ${refusal}.`
     : parsed.reply ||
       (command
@@ -397,6 +418,36 @@ async function recordSocialAction(
     await relRepo.applyDelta(target.id, actor.id, 4);
   }
   for (const twinId of [actor.id, target.id]) {
+    await memRepo.append({ id: randomUUID(), twinId, kind: "act", content: line, importance: 2, createdAt: at.toISOString() });
+  }
+}
+
+/** "Take Sena to the cinema": the partner agreed and comes along — same activity, same place. */
+async function bringAlong(
+  actor: Twin,
+  partner: Twin,
+  order: OwnerOrder,
+  twinRepo: DrizzleTwinRepository,
+  relRepo: DrizzleRelationshipRepository,
+  memRepo: DrizzleMemoryRepository,
+  at: Date
+): Promise<void> {
+  const action = order.action!;
+  clearQueuedSteps(partner.id);
+  await twinRepo.save({
+    ...partner,
+    locationZone: order.zone,
+    stamina: staminaAfter(staminaOf(partner), action, order.zone),
+    order: {
+      ...order, auto: true, targetName: actor.name,
+      label: `${action.label} with ${actor.name}`,
+      action: { ...action, targetName: actor.name, refused: false }
+    }
+  });
+  await relRepo.applyDelta(actor.id, partner.id, 2);
+  await relRepo.applyDelta(partner.id, actor.id, 2);
+  const line = `${actor.name} and ${partner.name} went to ${action.label} together.`;
+  for (const twinId of [actor.id, partner.id]) {
     await memRepo.append({ id: randomUUID(), twinId, kind: "act", content: line, importance: 2, createdAt: at.toISOString() });
   }
 }

@@ -52,6 +52,24 @@ The village pauses when you close the app. When you open it again, every twin is
   - **Style:** clothes, clothes colour, glasses and accessories.
 - Clothes, hair and facial hair are open to everyone.
 
+**Explore Main Street.** One winding street runs from the shared house to the rollercoaster. Drag to move around the map, right-drag (or two fingers) to rotate, scroll to zoom. Along the street:
+
+| Place | What twins do there | Energy |
+|---|---|---|
+| 🏠 The house | sleep (they go inside; 💤 shows on the roof) | back to 100 |
+| 🌳 Quiet corner | read and rest on the bench | +20 |
+| 🚲 The bikes | ride along the street and back | −15 |
+| ☕ The café | sit at a table, eat, drink coffee or fresh juice | +15 (juice +10) |
+| 🥕 The garden | dig, plant and pick vegetables — then juice at the café | −10 |
+| 🎤 The stage | sing and perform | −10 |
+| 🏋️ The gym | treadmill and weights | −25 |
+| 🏊 The pool | swim lengths, or sunbathe on a lounger | −25 (lounger +10) |
+| 🌸 The lawn | picnic and sit | +10 |
+| 🎬 The cinema | watch a movie under the sky, with popcorn | −5 |
+| 🎢 The rollercoaster | queue, ride, arms up on the drop 😱 | −15 |
+
+**Energy.** Every twin has energy from 0 to 100 (see it in the twin's card). Activities use it; resting gives it back. Below 20 a twin is tired: it rests first (the house when it's nearly empty, otherwise the café or the quiet corner). If you tell a tired twin to do something tiring, it answers "I'm tired, let me rest first."
+
 **Talk to your twin.** Your main twin is you in the village. Chat with it at the bottom left. It remembers what you tell it, and it does what you ask, if it can:
 
 | You type | Your twin… |
@@ -61,6 +79,8 @@ The village pauses when you close the app. When you open it again, every twin is
 | `tell Sena dinner is ready` | walks to Sena and passes the message on |
 | `jump`, `dance`, `wave`, `take a nap` | does it |
 | `wash your hands`, `drink coffee`, `read a book` | walks to the right place and does it |
+| `go swimming`, `work out`, `ride a bike`, `watch a movie`, `ride the rollercoaster`, `pick vegetables`, `make juice`, `go to sleep` | goes there and does it |
+| `take Sena to the cinema` | invites Sena; both go — **if Sena agrees** |
 | `hug Sena`, `kiss Sena on the cheek`, `high five Omar` | walks to them and does it — **if they agree** |
 | `play the guitar` (anything else) | acts it out, if it is safe |
 | `stay here` / `do whatever you want` | stays put / goes back to its own life |
@@ -72,7 +92,7 @@ The village pauses when you close the app. When you open it again, every twin is
 - Twins can't fly, teleport or leave the island.
 - Touching (hug, cheek kiss) needs consent. A twin who doesn't like yours enough says no.
 
-**Watch the village live its life.** While the app is open, the AI picks what each villager does next: where to go, who to talk to, what to do. Twins become friends or rivals, and big moments show as captions. Before your twin makes a big dramatic move, it asks you first.
+**Watch the village live its life.** While the app is open, the AI plans each twin's next few activities (a short to-do list: where to go, with whom, what to do), using their personality, friendships and energy. Twins become friends or rivals, and big moments show as captions. Before your twin makes a big dramatic move, it asks you first.
 
 **Main twin and villagers**
 
@@ -100,15 +120,15 @@ AiVillage does not include an AI. You connect your own, on the **Settings** page
 
 **Your key stays on your computer.** It is saved in the village database on your machine. It is never sent to us.
 
-**You pay your provider.** Every time a twin thinks or talks, the app makes an AI call on your account. The **chattiness** setting decides how often twins act. Settings shows an estimate for the model you picked. With Claude Haiku 5.5 it is roughly:
+**You pay your provider.** Every time a twin thinks or talks, the app makes an AI call on your account. The **chattiness** setting decides how often twins act. Twins also ask their AI what to do next: one call plans their next 3 activities. Settings shows an estimate for the model you picked. With Claude Haiku 5.5 it is roughly:
 
 | Chattiness | AI calls per hour | Cost per hour (Claude Haiku 5.5) |
 |---|---|---|
-| Calm | about 45 | about $0.01 |
-| Normal | about 180 | about $0.05 |
-| Busy | about 360 | about $0.11 |
+| Calm | about 125 | about $0.04 |
+| Normal | about 260 | about $0.08 |
+| Busy | about 440 | about $0.13 |
 
-These are estimates, for while the village is open. Nothing runs when the app is closed. Set a spending limit in your provider's dashboard to be safe.
+These are estimates, for while the village is open. Nothing runs when the app is closed. The village also pauses by itself when its tab is hidden for a minute, or when nobody touches it for 10 minutes; click to continue. Set a spending limit in your provider's dashboard to be safe.
 
 ### Using Ollama (free, local)
 

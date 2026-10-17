@@ -6,7 +6,7 @@
  */
 
 import type { CSSProperties, ReactNode } from "react";
-import { DAILY_ENERGY, ZONE_DISPLAY, type TwinDetail } from "@aivillage/shared";
+import { MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
 import { C, FONT, Z, barStyle, caps, card, hex, iconButton, pill, relTime, type Tone } from "./theme";
 
 const CSS = `
@@ -86,7 +86,13 @@ export function Inspector({
 
   const place = detail ? detail.zoneLabel || ZONE_DISPLAY[detail.zone] || detail.zone : "";
   const color = detail ? hex(detail.colorHex) : C.faint;
-  const energy = detail ? barStyle(detail.energy / DAILY_ENERGY, detail.energy <= 1 ? "amber" : "green") : null;
+  // energy 0–100 (older servers don't send it yet: full)
+  const stamina = detail ? Math.round(detail.stamina ?? MAX_STAMINA) : MAX_STAMINA;
+  const tired = stamina < TIRED_BELOW;
+  const friends = detail ? detail.relationships.filter((r) => r.score > 0).length : 0;
+  const rivals = detail ? detail.relationships.filter((r) => r.score < 0).length : 0;
+  const energy = detail ? barStyle(stamina / MAX_STAMINA, tired ? "amber" : "green") : null;
+  const placeEmoji = detail ? ZONE_EMOJI[detail.zone] ?? "" : "";
   const goal = detail?.goals.find((g) => g.trim());
 
   return (
@@ -142,19 +148,23 @@ export function Inspector({
             {place && <span style={{ fontSize: 12, color: C.muted }}>at {place}</span>}
           </div>
 
-          {place && <Row label="Location">{place}</Row>}
+          {place && <Row label="Location">{placeEmoji ? `${placeEmoji} ` : ""}{place}</Row>}
           <Row label="Popularity">
             {detail.popularity}
             {detail.rank > 0 && detail.villagerCount > 0 && (
               <span style={{ color: C.muted, fontWeight: 400 }}> · #{detail.rank} of {detail.villagerCount}</span>
             )}
           </Row>
+          <Row label="Friends">
+            {friends}
+            <span style={{ color: C.muted, fontWeight: 400 }}> · {rivals} rival{rivals === 1 ? "" : "s"}</span>
+          </Row>
           <Row label="Reputation">{detail.reputation}</Row>
           {energy && (
             <Row label="Energy">
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, width: 130 }}>
+              <span role="meter" aria-valuemin={0} aria-valuemax={MAX_STAMINA} aria-valuenow={stamina} aria-label={tired ? "Energy (tired)" : "Energy"} style={{ display: "inline-flex", alignItems: "center", gap: 8, width: 150 }}>
                 <span style={energy.track}><span style={{ ...energy.fill, display: "block" }} /></span>
-                <span style={{ fontSize: 12 }}>{detail.energy}/{DAILY_ENERGY}</span>
+                <span style={{ fontSize: 12, minWidth: 26, textAlign: "right" }}>{tired ? "😴 " : ""}{stamina}</span>
               </span>
             </Row>
           )}

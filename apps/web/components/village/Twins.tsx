@@ -10,13 +10,13 @@ import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import type { Appearance } from "@aivillage/shared";
-import { avatarPose, bodyLift, type VillageSim } from "../../lib/village/sim";
+import { avatarPose, bodyLift, isRiding, type VillageSim } from "../../lib/village/sim";
 import { Avatar, type AvatarPose } from "./avatar";
 
 export const TWIN_HEIGHT = 1.05;
 const ACCENT = "#2f6bff";
 const hexCss = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
-const REST_POSE: AvatarPose = { anim: "idle", animTime: 0, walking: false, walkPhase: 0, speed: 1 };
+const REST_POSE: AvatarPose = { anim: "idle", animTime: 0, walking: false, walkPhase: 0, speed: 1, item: null };
 
 const pill: React.CSSProperties = {
   fontFamily: "var(--font-ui), Inter, system-ui, sans-serif",
@@ -47,31 +47,49 @@ export function TwinAvatar({
   const statusEl = useRef<HTMLDivElement>(null);
   const bubbleEl = useRef<HTMLDivElement>(null);
   const markEl = useRef<HTMLDivElement>(null);
-  const label = useRef({ name: "", status: "", bubble: "", speaking: false });
+  const badgeEl = useRef<HTMLDivElement>(null);
+  const label = useRef({ name: "", status: "", bubble: "", speaking: false, hidden: false, ring: true });
 
   const twin0 = sim.twins.get(id);
   const color = twin0?.colorHex ?? 0x5b8cff;
   // world updates bring a fresh object each time — rebuild the body only when the look changes
   const lookKey = JSON.stringify(appearance);
   const look = useMemo(() => appearance, [lookKey]);
-  // the sim runs on performance.now() seconds (see SimDriver)
-  const pose = useCallback(() => {
+  // the sim runs on its own clock (see SimDriver); the pose carries the held item too
+  const pose = useCallback((): AvatarPose => {
     const tw = sim.twins.get(id);
-    return tw ? avatarPose(tw, performance.now() / 1000) : REST_POSE;
+    return tw ? avatarPose(tw, sim.now) : REST_POSE;
   }, [sim, id]);
 
   useFrame(({ clock }) => {
     const tw = sim.twins.get(id);
     if (!tw || !root.current || !body.current) return;
-    root.current.position.set(tw.x, 0, tw.z);
+    // asleep in the house: no body, no badge
+    const l = label.current;
+    if (l.hidden !== tw.hidden) {
+      l.hidden = tw.hidden;
+      root.current.visible = !tw.hidden;
+      if (badgeEl.current) badgeEl.current.style.display = tw.hidden ? "none" : "flex";
+    }
+    if (tw.hidden) return;
+    const lift = bodyLift(tw);
+    const riding = isRiding(tw);
+    // a coaster rider: the whole twin (badge included) rides up with the cart, tilted with the track
+    root.current.position.set(tw.x, riding ? lift : 0, tw.z);
+    body.current.position.y = riding ? 0 : lift;
+    body.current.rotation.order = "YXZ";
     body.current.rotation.y = tw.yaw; // the rig animates everything else
-    body.current.position.y = bodyLift(tw);
-    if (ring.current) {
+    body.current.rotation.x = -tw.pitch; // + pitch = nose up
+    const showRing = !riding && tw.task?.phase !== "swim";
+    if (ring.current && l.ring !== showRing) {
+      l.ring = showRing;
+      ring.current.visible = showRing;
+    }
+    if (ring.current && showRing) {
       const pulse = 1 + Math.sin(clock.elapsedTime * 2.2 + tw.phase) * 0.12;
       ring.current.scale.set(pulse, pulse, 1);
     }
     // labels: touch the DOM only when something changed
-    const l = label.current;
     if (nameEl.current && l.name !== tw.name) nameEl.current.textContent = l.name = tw.name;
     const status = tw.status ?? "";
     if (statusEl.current && l.status !== status) {
@@ -99,10 +117,10 @@ export function TwinAvatar({
       }}
       onPointerOver={(e) => {
         e.stopPropagation();
-        document.body.style.cursor = "pointer";
+        document.body.dataset.hoverTwin = "1";
       }}
       onPointerOut={() => {
-        document.body.style.cursor = "";
+        delete document.body.dataset.hoverTwin;
       }}
     >
       <group ref={body}>
@@ -121,7 +139,7 @@ export function TwinAvatar({
       </mesh>
 
       <Html position={[0, TWIN_HEIGHT + 0.22, 0]} center zIndexRange={[20, 10]} style={{ pointerEvents: "none" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, transform: "translateY(-50%)" }}>
+        <div ref={badgeEl} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, transform: "translateY(-50%)" }}>
           <div ref={markEl} style={{ ...pill, display: "none", background: hexCss(color), color: "#fff", fontSize: 13, padding: "2px 8px" }}>
             💬
           </div>

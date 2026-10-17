@@ -12,13 +12,13 @@ import { useFrame } from "@react-three/fiber";
 import { colorHex, HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES, type Appearance } from "@aivillage/shared";
 import { bodyShape, headShape } from "./features";
 import type { AvatarPose } from "./types";
-import { LIMB, PoseBlender, faceFor, hipHeight, propFor, type Rig } from "./pose";
+import { LIMB, PoseBlender, bikeCrank, bikeWheel, faceFor, hipHeight, kernelVisible, propFor, seatLift, type Rig } from "./pose";
 import {
   FOREARM, G, HEAD_Y, NECK_Y, SHOULDER_Y, UPPER_ARM, acquireFace, beardGeometry, beardMaterial, blankFace, faceGeometry, headGeometry, mat,
   moustacheGeometry, releaseFace, stubbleMaterial, torsoGeometry
 } from "./assets";
 import { Accessory, Hair, M, Stripe, TorsoDetails, outfitLook } from "./Look";
-import { ChestProps, Finger, HandProps, RootProps, newPropNodes } from "./Props";
+import { ChestProps, Finger, ForearmProps, HandProps, LeftHandProps, RootProps, newPropNodes, nodeShown, type PropNodeKey } from "./Props";
 
 interface Nodes {
   root: THREE.Group | null;
@@ -139,10 +139,7 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
     }
 
     // seated: keep the hips on the seat whatever the body's height
-    if (n.root) {
-      const sit = r.g > 0.5 ? Math.max(0, Math.min(1, (r.ltf + r.rtf - 1.6) / 1.2)) : 0;
-      n.root.position.y = sit ? hipHeight(r) * scale * (1 - body.scale) * sit : 0;
-    }
+    if (n.root) n.root.position.y = seatLift(r, p.anim, scale, body.scale);
 
     // hair tails sway
     n.tails.forEach((g, i) => {
@@ -160,18 +157,36 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
       n.skirt.rotation.x = -0.8 * sit;
     }
 
-    // props
+    // props (a held item overrides the anim's own prop; the basket waits on the ground while digging)
     const prop = propFor(p);
-    if (prop !== L.prop) {
-      for (const [id, g] of Object.entries(props.groups)) if (g) g.visible = id === prop;
-      for (const d of props.drops) d.visible = prop === "can";
-      L.prop = prop;
+    const shown: PropNodeKey | null = prop === "basket" && p.anim === "dig" && !p.walking ? "basketGround" : prop;
+    if (shown !== L.prop) {
+      for (const [id, g] of Object.entries(props.groups)) if (g) g.visible = nodeShown(id, shown);
+      for (const d of props.drops) d.visible = shown === "can";
+      if (props.kernel) props.kernel.visible = false;
+      L.prop = shown;
     }
     const root = n.root;
     if (!root || !prop) return;
+    const lift = Math.max(0, Math.min(1, (r.re - 1.3) / 1.0));
     if (prop === "cup" && props.cup) {
-      const lift = Math.max(0, Math.min(1, (r.re - 1.3) / 1.0));
       orientInRoot(props.cup, root, qWant.setFromEuler(eTmp.set(-0.75 * lift, 0, 0)));
+    } else if (prop === "juice" && props.juice) {
+      orientInRoot(props.juice, root, qWant.setFromEuler(eTmp.set(-0.6 * lift, 0, 0)));
+    } else if (prop === "plate") {
+      if (props.plate) orientInRoot(props.plate, root, qWant.setFromEuler(eTmp.set(0.05, 0, 0)));
+      // fork: tines toward the plate at rest, toward the mouth when the hand comes up
+      if (props.fork) orientInRoot(props.fork, root, qWant.setFromEuler(eTmp.set(0.9 - 2.1 * lift, 0, 0.25 - 0.25 * lift)));
+    } else if (prop === "popcorn") {
+      if (props.tub) orientInRoot(props.tub, root, qWant.setFromEuler(eTmp.set(0.12, 0, 0)));
+      if (props.kernel) props.kernel.visible = p.anim === "watch" && kernelVisible(p.animTime);
+    } else if (prop === "basket" && props.basket && shown === "basket") {
+      orientInRoot(props.basket, root, qWant.setFromEuler(eTmp.set(p.walking ? 0.07 * Math.sin(p.walkPhase) : 0, 0, 0)));
+    } else if (prop === "bike") {
+      const w = bikeWheel(p);
+      if (props.wheels[0]) props.wheels[0].rotation.x = w;
+      if (props.wheels[1]) props.wheels[1].rotation.x = w;
+      if (props.crank) props.crank.rotation.x = bikeCrank(p);
     } else if (prop === "phone" && props.phone) {
       orientInRoot(props.phone, root, qWant.setFromEuler(eTmp.set(-0.15, 0, 0.12)));
     } else if (prop === "can" && props.can) {
@@ -251,6 +266,7 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
               <Stripe outfit={a.outfit} side={side} len={0.1} x={0.035 * body.arm} y={-0.06} />
               <group ref={(g) => { n.el[i] = g; }} position={[0, -UPPER_ARM, 0]}>
                 <M g={G.forearm()} m={armM} scale={[body.arm, 1, body.arm]} />
+                {side === 1 && <ForearmProps n={props} />}
                 <Stripe outfit={a.outfit} side={side} len={0.08} x={0.031 * body.arm} y={-0.045} />
                 <group ref={(g) => { n.ha[i] = g; }} position={[0, -FOREARM, 0]}>
                   <M g={G.hand()} m={skinM} scale={body.hand} />
@@ -260,6 +276,7 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
                       <Finger n={props} skin={skin} />
                     </>
                   )}
+                  {side === 1 && <LeftHandProps n={props} />}
                 </group>
               </group>
             </group>

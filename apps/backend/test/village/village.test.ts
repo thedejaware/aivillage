@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { MAX_TWINS, DEFAULT_APPEARANCE } from "@aivillage/shared";
+import { MAX_TWINS, DEFAULT_APPEARANCE, LAYOUT_VERSION } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import {
   ensureLocalOwner, villageInfo, createTwin, updateTwin, deactivateTwin, activateTwin, deleteTwin, VillageError
@@ -120,7 +120,28 @@ describe("savePoses", () => {
     const t = await createTwin(tdb.db, { name: "Memo", appearance: look, role: "main" });
     await savePoses(tdb.db, [{ id: t.id, x: -3.2, z: 1.4, yaw: 1.1, zone: "maker_space" }, { id: "00000000-0000-0000-0000-000000000000", x: 0, z: 0, yaw: 0, zone: "plaza" }]);
     const saved = await new DrizzleTwinRepository(tdb.db).getById(t.id);
-    expect(saved!.pose).toEqual({ x: -3.2, z: 1.4, yaw: 1.1, zone: "maker_space" });
+    expect(saved!.pose).toEqual({ x: -3.2, z: 1.4, yaw: 1.1, zone: "maker_space", layout: LAYOUT_VERSION });
     expect(saved!.locationZone).toBe("maker_space");
+  });
+
+  it("an unknown zone keeps the twin's venue; stamina survives a pose save", async () => {
+    const { savePoses } = await import("../../src/village/village.js");
+    const t = await createTwin(tdb.db, { name: "Odd", appearance: look, role: "villager", zone: "gym" });
+    await savePoses(tdb.db, [{ id: t.id, x: 1, z: 2, yaw: 0, zone: "old_moon_base" }]);
+    const saved = await new DrizzleTwinRepository(tdb.db).getById(t.id);
+    expect(saved!.locationZone).toBe("gym");
+    // only the pose is touched: stamina written meanwhile survives
+    const repo = new DrizzleTwinRepository(tdb.db);
+    await repo.save({ ...saved!, stamina: 42 });
+    await savePoses(tdb.db, [{ id: t.id, x: 1, z: 2, yaw: 0, zone: "pool" }]);
+    expect((await repo.getById(t.id))!).toMatchObject({ stamina: 42, locationZone: "pool" });
+  });
+});
+
+describe("createTwin stamina", () => {
+  it("a new twin starts fully rested", async () => {
+    const t = await createTwin(tdb.db, { name: "Fresh", appearance: look, role: "villager" });
+    expect(t.stamina).toBe(100);
+    expect((await new DrizzleTwinRepository(tdb.db).getById(t.id))!.stamina).toBe(100);
   });
 });

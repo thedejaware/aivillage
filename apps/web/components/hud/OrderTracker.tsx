@@ -23,7 +23,7 @@ interface Step { icon: string; label: string }
 const CSS = `
 @keyframes hud-pulse {
   0%   { box-shadow: 0 0 0 0 rgba(47,107,255,0.40); }
-  70%  { box-shadow: 0 0 0 9px rgba(47,107,255,0); }
+  70%  { box-shadow: 0 0 0 6px rgba(47,107,255,0); }
   100% { box-shadow: 0 0 0 0 rgba(47,107,255,0); }
 }
 .hud-step-current { animation: hud-pulse 1.8s ease-out infinite; }
@@ -32,10 +32,10 @@ const CSS = `
 `;
 
 function stepsFor(order: TrackedOrder): Step[] {
-  if (order.kind === "stay") return [{ icon: "📋", label: "Order given" }, { icon: "📍", label: "Staying" }];
+  if (order.kind === "stay") return [{ icon: "💬", label: "Asked" }, { icon: "📍", label: "Staying" }];
   if (order.kind === "talk_to") {
     return [
-      { icon: "📋", label: "Order given" },
+      { icon: "💬", label: "Asked" },
       { icon: "🚶", label: "Walking" },
       { icon: "👀", label: `Found ${order.targetName ?? "them"}` },
       { icon: "💬", label: "Talking" }
@@ -44,14 +44,14 @@ function stepsFor(order: TrackedOrder): Step[] {
   if (order.kind === "act" && order.action) {
     const a = order.action;
     return [
-      { icon: "📋", label: "Order given" },
+      { icon: "💬", label: "Asked" },
       { icon: "🚶", label: "Walking" },
       { icon: a.targetName ? "👀" : "📍", label: a.targetName ? `Found ${a.targetName}` : "Arrived" },
       a.refused ? { icon: "🙅", label: `${a.targetName ?? "They"} said no` } : { icon: a.emoji, label: a.label }
     ];
   }
   return [
-    { icon: "📋", label: "Order given" },
+    { icon: "💬", label: "Asked" },
     { icon: "🚶", label: "Walking" },
     { icon: "📍", label: "Arrived" },
     { icon: "✨", label: "Hanging out" }
@@ -105,14 +105,14 @@ export function OrderTracker({
 
   return (
     <section
-      aria-label="Order tracking"
-      style={{ ...card, width: "min(520px, calc(100vw - 32px))", boxSizing: "border-box", padding: "12px 16px 14px", fontFamily: FONT, ...style }}
+      aria-label={`What ${twinName} is doing`}
+      style={{ ...card, width: "min(400px, calc(100vw - 32px))", boxSizing: "border-box", padding: "8px 12px 9px", fontFamily: FONT, ...style }}
     >
       <style>{CSS}</style>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: C.text, whiteSpace: "nowrap" }}>Order tracking</span>
-        <span style={{ fontSize: 12, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-          {twinName} · {order.label}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 7 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: C.text, whiteSpace: "nowrap" }}>What {twinName} is doing</span>
+        <span style={{ fontSize: 11.5, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+          {order.label}
         </span>
       </div>
 
@@ -121,8 +121,8 @@ export function OrderTracker({
           const done = i < current;
           const isCurrent = i === current;
           const circle: CSSProperties = {
-            width: 34, height: 34, borderRadius: 999, flexShrink: 0, position: "relative", zIndex: 1,
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: done ? 15 : 16, fontWeight: 700,
+            width: 24, height: 24, borderRadius: 999, flexShrink: 0, position: "relative", zIndex: 1,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: done ? 11 : 12, fontWeight: 700,
             background: done ? C.blue : isCurrent ? C.blueSoft : C.greySoft,
             color: done ? "#fff" : C.text,
             border: `2px solid ${done || isCurrent ? C.blue : "rgba(20,40,80,0.10)"}`,
@@ -140,7 +140,7 @@ export function OrderTracker({
                 <span
                   aria-hidden
                   style={{
-                    position: "absolute", top: 16, right: "50%", width: "100%", height: 2,
+                    position: "absolute", top: 11, right: "50%", width: "100%", height: 2,
                     background: i <= current ? C.blue : "rgba(20,40,80,0.10)"
                   }}
                 />
@@ -149,13 +149,13 @@ export function OrderTracker({
               <span
                 className="hud-step-label"
                 style={{
-                  marginTop: 6, fontSize: 11.5, fontWeight: isCurrent ? 700 : 600, textAlign: "center", padding: "0 2px",
+                  marginTop: 3, fontSize: 10.5, fontWeight: isCurrent ? 700 : 600, textAlign: "center", padding: "0 2px",
                   color: done || isCurrent ? C.text : C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%"
                 }}
               >
                 {s.label}
               </span>
-              <span className="hud-step-time" style={{ ...caps, fontSize: 10, letterSpacing: "0.02em", textTransform: "none", fontWeight: 500, color: isCurrent ? C.blue : C.faint }}>
+              <span className="hud-step-time" style={{ ...caps, fontSize: 9, letterSpacing: "0.02em", textTransform: "none", fontWeight: 500, color: isCurrent ? C.blue : C.faint }}>
                 {timeFor(i)}
               </span>
             </li>

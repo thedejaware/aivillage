@@ -1,5 +1,5 @@
 import {
-  colorForId, isOrderActive, labelFor, orderStatus, ZONE_DISPLAY,
+  colorForId, isOrderActive, MAX_STAMINA, labelFor, orderStatus, ZONE_DISPLAY,
   type TwinDetail
 } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
@@ -55,6 +55,7 @@ export async function twinDetail(
     zoneLabel: ZONE_DISPLAY[twin.locationZone] ?? twin.locationZone,
     reputation: twin.reputation,
     energy: twin.energy,
+    stamina: twin.stamina ?? MAX_STAMINA,
     popularity: pop.get(twin.id) ?? 0,
     rank: ranked.findIndex((t) => t.id === twin.id) + 1,
     villagerCount: twins.length,

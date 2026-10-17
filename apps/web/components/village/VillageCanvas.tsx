@@ -8,20 +8,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { MapControls } from "@react-three/drei";
 
-type OrbitControlsImpl = React.ElementRef<typeof OrbitControls>;
-import type { WorldState } from "@aivillage/shared";
+type MapControlsImpl = React.ElementRef<typeof MapControls>;
+import { LAYOUT_VERSION, type WorldState } from "@aivillage/shared";
 import { VillageSim } from "../../lib/village/sim";
+import { ISLAND_HALF } from "../../lib/village/layout";
 import { daynessAt } from "../../lib/village/clock";
 import { targetFps } from "../../lib/village/frameBudget";
 import { VillageWorld, VillageLighting } from "./World";
 import { TwinAvatar } from "./Twins";
 
-const HOME_POS = new THREE.Vector3(11, 10.5, 11);
+/** The home view fits the whole Main Street map (from the south-east, looking down the street). */
+const HOME_TARGET = new THREE.Vector3(0, 0, 0.8);
+const HOME_POS = new THREE.Vector3(9, 27, 26);
+/** HOME_POS fits a window at least this wide for its height; narrower windows back off. */
+const HOME_ASPECT = 1.55;
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const POSE_SAVE_MS = 15_000;
-const HOME_TARGET = new THREE.Vector3(0, 0, 0);
+/** Camera limits: near top-down to a low cinematic angle; close-up to the whole island. */
+const MIN_POLAR = 0.15;
+const MAX_POLAR = 1.45;
+const MIN_DIST = 5;
+const MAX_DIST = 60;
+/** The camera's look-at point stays over the island. */
+const TARGET_LIMIT = ISLAND_HALF;
 
 export interface CameraApi {
   zoom(factor: number): void;
@@ -30,9 +41,23 @@ export interface CameraApi {
   focus(x: number, z: number): void;
 }
 
-/** Owns OrbitControls and smooth camera moves (focus / home). */
+/** The home camera position: farther back on narrow (portrait) windows so the whole street fits. */
+function homePos(camera: THREE.Camera): THREE.Vector3 {
+  const aspect = camera instanceof THREE.PerspectiveCamera ? camera.aspect : HOME_ASPECT;
+  const off = HOME_POS.clone().sub(HOME_TARGET);
+  const k = THREE.MathUtils.clamp(HOME_ASPECT / Math.max(0.1, aspect), 1, MAX_DIST / off.length());
+  return HOME_TARGET.clone().addScaledVector(off, k);
+}
+
+/**
+ * Map-style camera:
+ *  - left-drag moves the map (hand cursor), right-drag or Shift + drag rotates;
+ *  - the mouse wheel, a trackpad two-finger swipe and a pinch all zoom toward the cursor.
+ * No damping: the map follows the pointer at once, even at a low frame rate.
+ * Also owns the smooth moves for the buttons (zoom / rotate / home / focus).
+ */
 function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
-  const controls = useRef<OrbitControlsImpl>(null);
+  const controls = useRef<MapControlsImpl>(null);
   const { camera } = useThree();
   const glide = useRef<{ target: THREE.Vector3; pos: THREE.Vector3 } | null>(null);
 
@@ -52,7 +77,7 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
         glide.current = { target: c.target.clone(), pos: c.target.clone().add(off) };
       },
       home() {
-        glide.current = { target: HOME_TARGET.clone(), pos: HOME_POS.clone() };
+        glide.current = { target: HOME_TARGET.clone(), pos: homePos(camera) };
       },
       focus(x, z) {
         const c = controls.current;
@@ -75,16 +100,41 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
     if (c.target.distanceTo(g.target) < 0.01 && camera.position.distanceTo(g.pos) < 0.01) glide.current = null;
   });
 
+  // start on the home view (once — not as a prop, re-renders would reset it)
+  useEffect(() => {
+    const c = controls.current;
+    if (!c) return;
+    c.target.copy(HOME_TARGET);
+    camera.position.copy(homePos(camera));
+    c.update();
+  }, [camera]);
+
+  // keep the look-at point over the island: shift camera + target together
+  const clampTarget = () => {
+    const c = controls.current;
+    if (!c) return;
+    const t = c.target;
+    const cx = THREE.MathUtils.clamp(t.x, -TARGET_LIMIT, TARGET_LIMIT);
+    const cz = THREE.MathUtils.clamp(t.z, -TARGET_LIMIT, TARGET_LIMIT);
+    const cy = THREE.MathUtils.clamp(t.y, 0, 2);
+    if (cx === t.x && cz === t.z && cy === t.y) return;
+    const delta = new THREE.Vector3(cx - t.x, cy - t.y, cz - t.z);
+    t.add(delta);
+    camera.position.add(delta);
+  };
+
   return (
-    <OrbitControls
+    <MapControls
       ref={controls}
       makeDefault
-      enableDamping
-      dampingFactor={0.08}
-      minPolarAngle={0.35}
-      maxPolarAngle={1.25}
-      minDistance={6}
-      maxDistance={34}
+      enableDamping={false}
+      screenSpacePanning={false}
+      zoomToCursor
+      minPolarAngle={MIN_POLAR}
+      maxPolarAngle={MAX_POLAR}
+      minDistance={MIN_DIST}
+      maxDistance={MAX_DIST}
+      onChange={clampTarget}
       onStart={() => { glide.current = null; }}
     />
   );
@@ -94,9 +144,10 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
  * Drives redraws on demand: 30 fps while idle, 60 fps while the user moves the
  * camera, nothing while the tab is hidden (see frameBudget).
  */
-function FrameLimiter() {
+function FrameLimiter({ paused }: { paused: boolean }) {
   const { invalidate, gl } = useThree();
   useEffect(() => {
+    if (paused) return; // the village is paused: no frames at all
     let lastInteraction = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
@@ -124,13 +175,21 @@ function FrameLimiter() {
       el.removeEventListener("wheel", touch);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [invalidate, gl]);
+  }, [invalidate, gl, paused]);
   return null;
 }
 
-/** Advances the simulation once per frame. */
-function SimDriver({ sim }: { sim: VillageSim }) {
-  useFrame((_, delta) => sim.step(performance.now() / 1000, Math.min(0.1, Math.max(0.001, delta))));
+/**
+ * Advances the simulation once per frame on its own clock: it only moves while
+ * frames are drawn, so a hidden tab or a paused village resumes where it was
+ * (nothing ends or jumps while nobody watches).
+ */
+function SimDriver({ sim, clock }: { sim: VillageSim; clock: React.MutableRefObject<number> }) {
+  useFrame((_, delta) => {
+    const dt = Math.min(0.1, Math.max(0.001, delta));
+    clock.current += dt;
+    sim.step(clock.current, dt);
+  });
   return null;
 }
 
@@ -142,7 +201,9 @@ export default function VillageCanvas({
   onSelect,
   onOrderArrive,
   focusRequest,
-  controlsRight = 16
+  controlsRight = 16,
+  paused = false,
+  savePoses = true
 }: {
   state: WorldState;
   myTwinId: string | null;
@@ -155,15 +216,20 @@ export default function VillageCanvas({
   focusRequest?: { id: string; n: number } | null;
   /** keeps the camera buttons clear of the inspector card */
   controlsRight?: number;
+  /** auto-paused (nobody watching): draw nothing */
+  paused?: boolean;
+  /** remember where twins stand on the server (off for previews with made-up twins) */
+  savePoses?: boolean;
 }) {
   const onArriveRef = useRef(onOrderArrive);
   onArriveRef.current = onOrderArrive;
   const sim = useMemo(() => new VillageSim({ onOrderArrive: (id, s) => onArriveRef.current?.(id, s) }), []);
   const cameraApi = useRef<CameraApi | null>(null);
+  const simClock = useRef(0);
   const [dayness, setDayness] = useState(() => daynessAt(Date.now()));
 
   useEffect(() => {
-    sim.reconcile(state, performance.now() / 1000);
+    sim.reconcile(state, simClock.current);
   }, [sim, state]);
 
   useEffect(() => {
@@ -172,7 +238,8 @@ export default function VillageCanvas({
 
   // remember where everyone stands, so the village reopens exactly here
   useEffect(() => {
-    const body = () => JSON.stringify({ poses: sim.poses().map((p) => ({ ...p, x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(3) })) });
+    if (!savePoses) return;
+    const body = () => JSON.stringify({ poses: sim.poses().map((p) => ({ ...p, layout: LAYOUT_VERSION, x: +p.x.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(3) })) });
     const save = () => {
       if (sim.twins.size === 0) return;
       void fetch(`${API}/api/poses`, { method: "PUT", headers: { "content-type": "application/json" }, body: body() }).catch(() => {});
@@ -189,7 +256,7 @@ export default function VillageCanvas({
       window.removeEventListener("pagehide", beacon);
       save();
     };
-  }, [sim]);
+  }, [sim, savePoses]);
 
   // the sky changes slowly — re-render the world twice a second, not every frame
   useEffect(() => {
@@ -205,7 +272,20 @@ export default function VillageCanvas({
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0 }}>
+      <div
+        className="village-canvas"
+        style={{ position: "fixed", inset: 0 }}
+        onPointerDown={(e) => { if (e.button === 0) e.currentTarget.classList.add("dragging"); }}
+        onPointerUp={(e) => e.currentTarget.classList.remove("dragging")}
+        onPointerCancel={(e) => e.currentTarget.classList.remove("dragging")}
+        onPointerLeave={(e) => e.currentTarget.classList.remove("dragging")}
+      >
+        {/* hand cursor: open over the map, closed while dragging, a pointer over a twin */}
+        <style>{`
+          .village-canvas canvas { cursor: grab; }
+          .village-canvas.dragging canvas { cursor: grabbing; }
+          body[data-hover-twin] .village-canvas canvas { cursor: pointer; }
+        `}</style>
         <Canvas
           shadows={{ type: THREE.PCFSoftShadowMap }}
           frameloop="demand"
@@ -215,7 +295,7 @@ export default function VillageCanvas({
           onPointerMissed={() => onSelect(null)}
         >
           <VillageLighting dayness={dayness} />
-          <VillageWorld structures={state.structures} myTwinId={myTwinId} dayness={dayness} />
+          <VillageWorld structures={state.structures} myTwinId={myTwinId} dayness={dayness} sim={sim} />
           {state.twins.map((t) => (
             <TwinAvatar
               key={t.id}
@@ -227,8 +307,8 @@ export default function VillageCanvas({
               onSelect={onSelect}
             />
           ))}
-          <SimDriver sim={sim} />
-          <FrameLimiter />
+          <SimDriver sim={sim} clock={simClock} />
+          <FrameLimiter paused={paused} />
           <CameraRig api={cameraApi} />
         </Canvas>
       </div>
@@ -243,16 +323,23 @@ export default function VillageCanvas({
         }}
       >
         {[
-          { label: "+", title: "Zoom in", act: () => cameraApi.current?.zoom(1.3) },
-          { label: "−", title: "Zoom out", act: () => cameraApi.current?.zoom(1 / 1.3) },
-          { label: "⟲", title: "Rotate left", act: () => cameraApi.current?.rotate(Math.PI / 4) },
-          { label: "⟳", title: "Rotate right", act: () => cameraApi.current?.rotate(-Math.PI / 4) },
+          { label: "+", title: "Zoom in (or two fingers / mouse wheel)", act: () => cameraApi.current?.zoom(1.3) },
+          { label: "−", title: "Zoom out (or two fingers / mouse wheel)", act: () => cameraApi.current?.zoom(1 / 1.3) },
+          { label: "⟲", title: "Rotate left (or Shift + drag)", act: () => cameraApi.current?.rotate(Math.PI / 4) },
+          { label: "⟳", title: "Rotate right (or Shift + drag)", act: () => cameraApi.current?.rotate(-Math.PI / 4) },
           { label: "⌂", title: "Reset view", act: () => cameraApi.current?.home() }
         ].map((b) => (
           <button key={b.title} title={b.title} aria-label={b.title} onClick={b.act} style={camBtn}>
             {b.label}
           </button>
         ))}
+        <span
+          title={"Move: click and drag\nRotate: Shift + drag, or right-drag\nZoom: two fingers on the trackpad, pinch, or the mouse wheel"}
+          aria-label="How to move the map: click and drag to move, Shift + drag to rotate, two fingers or the mouse wheel to zoom"
+          style={{ ...camBtn, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#8a94a6", cursor: "help" }}
+        >
+          ?
+        </span>
       </div>
     </>
   );

@@ -46,6 +46,16 @@ describe("pickActors (no daily cap — talk is paid by the player's own AI)", ()
     expect(out.map((t) => t.id)).toEqual(["free"]);
   });
 
+  it("skips twins busy at a busy place (pool, coaster…) but picks twins resting at calm places", () => {
+    const at = (id: string, zone: string, auto = true): Twin => ({
+      ...mkTwin(id),
+      order: { kind: "act", auto, zone, targetName: null, label: "x", issuedAt: "2026-10-17T11:59:00Z", holdUntil: "2026-10-17T12:04:00Z" }
+    });
+    const twins = [at("swimmer", "pool"), at("rider", "funfair"), at("eater", "maker_space"), at("viewer", "cinema"), at("boss", "maker_space", false)];
+    const out = pickActors(twins, { maxActors: 5, now: NOON, random: () => 0 });
+    expect(out.map((t) => t.id).sort()).toEqual(["eater", "viewer"]);
+  });
+
   it("picks the twin again once the order has expired", () => {
     const expired: Twin = {
       ...mkTwin("expired"),

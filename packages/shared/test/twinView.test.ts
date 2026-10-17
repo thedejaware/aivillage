@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Twin } from "../src/index.js";
-import { toWorldState, DEFAULT_ZONES, DEFAULT_APPEARANCE, HAIRSTYLES } from "../src/index.js";
+import { toWorldState, DEFAULT_ZONES, DEFAULT_APPEARANCE, HAIRSTYLES, LAYOUT_VERSION } from "../src/index.js";
 
 const base: Twin = {
   id: "t1", ownerUserId: "u1", name: "Memo Akin", traits: [], goals: [], avatarSpriteUrl: null,
@@ -25,9 +25,18 @@ describe("twin view: looks, role and saved pose", () => {
     expect(villager.isMain).toBe(false);
   });
   it("passes the saved pose so the village resumes where it was left", () => {
-    const pose = { x: 1.25, z: -2.5, yaw: 0.7, zone: "maker_space" };
+    const pose = { x: 1.25, z: -2.5, yaw: 0.7, zone: "maker_space", layout: LAYOUT_VERSION };
     const [t] = toWorldState({ zones: DEFAULT_ZONES, structures: [], twins: [{ ...base, pose }] }).twins;
     expect(t.pose).toEqual(pose);
+  });
+  it("ignores poses saved on the old map", () => {
+    const old = { x: 1.25, z: -2.5, yaw: 0.7, zone: "maker_space" };
+    const [t] = toWorldState({ zones: DEFAULT_ZONES, structures: [], twins: [{ ...base, pose: old }] }).twins;
+    expect(t.pose).toBeNull();
+  });
+  it("shows stamina (100 when unknown)", () => {
+    const [a, b] = toWorldState({ zones: DEFAULT_ZONES, structures: [], twins: [{ ...base, stamina: 35 }, { ...base, id: "t2" }] }).twins;
+    expect([a.stamina, b.stamina]).toEqual([35, 100]);
   });
   it("leaves deactivated twins out of the village", () => {
     const ws = toWorldState({ zones: DEFAULT_ZONES, structures: [], twins: [base, { ...base, id: "gone", active: false }] });

@@ -54,6 +54,13 @@ describe("twinDetail", () => {
     expect(d.relationships).toEqual([{ name: "Ravi", label: expect.any(String), score: 25 }]);
   });
 
+  it("shows energy (stamina 0–100); old rows read as 100", async () => {
+    // @ts-expect-error drizzle exposes raw client via session.client
+    await tdb.db.session.client.unsafe(`update twins set stamina = 15 where id = '${memoId}'`);
+    expect((await twinDetail(memoId, ownerId, tdb.db, NOW))!.stamina).toBe(15);
+    expect((await twinDetail(raviId, ownerId, tdb.db, NOW))!.stamina).toBe(100);
+  });
+
   it("keeps the owner's private facts out of the public life feed", async () => {
     const d = (await twinDetail(memoId, null, tdb.db, NOW))!;
     expect(d.recent.map((m) => m.content)).toEqual(["Memo and Ravi laughed at the café"]);

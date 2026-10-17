@@ -37,12 +37,12 @@ describe("modelChoices", () => {
 
 describe("costLine", () => {
   it("estimates dollars per hour for a priced model", () => {
-    expect(costLine(anthropic, "claude-haiku-5-5", "normal")).toBe("≈ $0.05 / hour");
+    expect(costLine(anthropic, "claude-haiku-5-5", "normal")).toBe("≈ $0.08 / hour");
   });
   it("is free for local models", () => {
     expect(costLine(ollama, "llama3.2", "busy")).toMatch(/free/i);
   });
   it("falls back to calls per hour when the price is unknown", () => {
-    expect(costLine(anthropic, "claude-opus-4-8", "normal")).toBe("about 180 AI calls / hour");
+    expect(costLine(anthropic, "claude-opus-4-8", "normal")).toBe("about 260 AI calls / hour");
   });
 });

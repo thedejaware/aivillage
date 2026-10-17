@@ -14,6 +14,8 @@ import { DEFAULT_ZONES, type WorldStructureView } from "@aivillage/shared";
 import { setNightness } from "./materials";
 import { Ground } from "./ground";
 import { Venues } from "./venues";
+import type { VillageSim } from "../../lib/village/sim";
+import type { PlacesSim } from "./venues/visibility";
 import { StructureView } from "./structures";
 
 export { SEAT_Y, STAGE_TOP } from "./scenery";
@@ -52,14 +54,20 @@ function dedupe(structures: WorldStructureView[]) {
   return { built, overflow };
 }
 
-export function VillageWorld({ structures, myTwinId, dayness }: { structures: WorldStructureView[]; myTwinId: string | null; dayness: number }) {
+/**
+ * `sim` drives the moving scenery (coaster cart, bikes in the rack, the 💤 sign
+ * over the house). Its newer fields are read defensively, so an older sim works.
+ */
+export function VillageWorld({
+  structures, myTwinId, dayness, sim
+}: { structures: WorldStructureView[]; myTwinId: string | null; dayness: number; sim?: VillageSim | null }) {
   const night = 1 - clamp01(dayness);
   useEffect(() => { setNightness(night); }, [night]);
   const { built, overflow } = useMemo(() => dedupe(structures), [structures]);
   return (
     <group>
       <Ground />
-      <Venues night={night} overflow={overflow} />
+      <Venues night={night} overflow={overflow} sim={sim as unknown as PlacesSim | null | undefined} />
       {built.map((st) => (
         <StructureView key={st.id} st={st} mine={!!myTwinId && st.builtByTwinId === myTwinId} />
       ))}
@@ -125,7 +133,8 @@ export function VillageLighting({ dayness }: { dayness: number }) {
     []
   );
   const bg = useMemo(() => new THREE.Color(), []);
-  const fog = useMemo(() => new THREE.Fog("#e7f1fb", 32, 85), []);
+  // starts past the far side of the island even when zoomed out to see it all
+  const fog = useMemo(() => new THREE.Fog("#e7f1fb", 55, 150), []);
 
   useEffect(() => {
     const prevBg = scene.background, prevFog = scene.fog;
@@ -143,8 +152,9 @@ export function VillageLighting({ dayness }: { dayness: number }) {
     const l = sun.current;
     if (!l) return;
     const cam = l.shadow.camera;
-    cam.left = -9; cam.right = 9; cam.top = 9; cam.bottom = -9;
-    cam.near = 1; cam.far = 45;
+    // covers the whole 24 × 24 island (plus the rides' height) from any sun angle
+    cam.left = -16; cam.right = 16; cam.top = 16; cam.bottom = -16;
+    cam.near = 1; cam.far = 55;
     cam.updateProjectionMatrix();
     l.shadow.mapSize.set(2048, 2048);
     l.shadow.bias = -0.0004;
@@ -178,7 +188,7 @@ export function VillageLighting({ dayness }: { dayness: number }) {
 
   return (
     <>
-      <mesh material={sky} scale={60} renderOrder={-1} frustumCulled={false}>
+      <mesh material={sky} scale={160} renderOrder={-1} frustumCulled={false}>
         <sphereGeometry args={[1, 32, 16]} />
       </mesh>
       <hemisphereLight ref={hemi} />

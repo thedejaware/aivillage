@@ -4,7 +4,7 @@
  * no React — so decor never lands on a road a twin walks.
  */
 import { DEFAULT_ZONES } from "@aivillage/shared";
-import { EDGES, ISLAND_HALF, NODES, zoneCenter, type Pt } from "../../lib/village/layout";
+import { EDGES, ISLAND_HALF, NODES, zoneCenter, type ActivityKind, type Pt } from "../../lib/village/layout";
 
 export const ROAD_W = 0.44;
 export const ROAD_H = 0.012;
@@ -20,28 +20,50 @@ export const VERGE_OUT = ISLAND_HALF - 0.2;
 /** Stage platform top: a performer standing on it should be lifted this much. */
 export const STAGE_TOP = 0.08;
 
-/** Heights (world Y) of the surfaces at each activity spot. */
-export const SEAT_Y = {
+/** Heights (world Y) of the surfaces at each activity spot (seat top, floor, or water level for swimmers). */
+export const SEAT_Y: Record<ActivityKind, number> = {
   coffee: PAD_TOP + 0.24,
   bench: PAD_TOP + 0.235,
   blanket: GRASS_TOP + 0.02,
-  stage: STAGE_TOP
-} as const;
+  stage: STAGE_TOP,
+  bed: PAD_TOP,
+  treadmill: PAD_TOP + 0.1,
+  weights: PAD_TOP,
+  swim: PAD_TOP - 0.3,
+  lounger: PAD_TOP + 0.2,
+  cinema: PAD_TOP + 0.24,
+  plot: GRASS_TOP,
+  coaster: PAD_TOP,
+  bike: PAD_TOP
+};
 
 /** Radius of the paved pad (or lawn) around each venue's centre. */
 export const PAD_RADIUS: Record<string, number> = {
   plaza: 1.3,
-  maker_space: 1.45,
+  home: 1.4,
   network_hub: 1.15,
-  event_space: 1.65
+  bike_rack: 1.0,
+  maker_space: 1.7,
+  garden: 1.4,
+  gym: 1.4,
+  event_space: 1.65,
+  pool: 1.9,
+  cinema: 1.7,
+  funfair: 2.0
 };
 
-/** The road node that sits at each venue's centre. */
+/** The road node that sits at each place's centre. */
 export const NODE_ZONE: Record<string, string> = {
-  C: "plaza",
-  CAFE: "maker_space",
+  STAGE: "plaza",
+  HOME: "home",
   QUIET: "network_hub",
-  LAWN: "event_space"
+  BIKES: "bike_rack",
+  CAFE: "maker_space",
+  GARDEN: "garden",
+  GYM: "gym",
+  LAWN: "event_space",
+  POOL: "pool",
+  CINEMA: "cinema"
 };
 
 export interface Pad extends Pt { zone: string; r: number }

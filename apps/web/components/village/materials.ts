@@ -40,7 +40,14 @@ export const ZONE_ACCENT: Record<string, string> = {
   plaza: "#2fbfa5",
   maker_space: "#ff9a4d",
   network_hub: "#3dbf7a",
-  event_space: "#ff7a8a"
+  event_space: "#ff7a8a",
+  home: "#8a7cf6",
+  bike_rack: "#1fb5c9",
+  garden: "#7cb83e",
+  gym: "#e2574c",
+  pool: "#2a9fe0",
+  cinema: "#b84fd6",
+  funfair: "#f5a623"
 };
 
 export const FLOWER_COLORS = ["#ff8fa3", "#ffd27a", "#ffffff", "#b9a5ff", "#ff9a4d"] as const;
@@ -76,7 +83,25 @@ export function decal(color: string, opacity: number): THREE.MeshStandardMateria
   return m;
 }
 
+const glasses = new Map<string, THREE.MeshStandardMaterial>();
+
+/** Clear tinted glass (gym walls): see-through, no depth write so what's behind still shows. */
+export function glass(color: string, opacity = 0.22): THREE.MeshStandardMaterial {
+  const key = `${color}|${opacity}`;
+  let m = glasses.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color, roughness: 0.08, metalness: 0.1, transparent: true, opacity, depthWrite: false });
+    glasses.set(key, m);
+  }
+  return m;
+}
+
 let nightness = 0;
+
+/** 0 = noon, 1 = midnight (for animated materials that blend their own night look). */
+export function getNightness(): number {
+  return nightness;
+}
 
 interface Ramp<M> { m: M; day: number; night: number }
 const glows = new Map<string, Ramp<THREE.MeshStandardMaterial>>();
@@ -138,6 +163,8 @@ export const unit = {
   cyl: () => cachedGeo("u:cyl", () => new THREE.CylinderGeometry(1, 1, 1, 20)),
   cyl8: () => cachedGeo("u:cyl8", () => new THREE.CylinderGeometry(1, 1, 1, 8)),
   ball: () => cachedGeo("u:ball", () => new THREE.SphereGeometry(1, 16, 12)),
+  /** 8×6 sphere for tiny props seen from afar (flowers, bulbs, veg) — ~5× fewer triangles. */
+  ballLow: () => cachedGeo("u:ballLow", () => new THREE.SphereGeometry(1, 8, 6)),
   ico: () => cachedGeo("u:ico", () => new THREE.IcosahedronGeometry(1, 0)),
   cone: () => cachedGeo("u:cone", () => new THREE.ConeGeometry(1, 1, 7)),
   dome: () => cachedGeo("u:dome", () => new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2))
@@ -146,7 +173,28 @@ export const unit = {
 /** Rounded box cached by size (rounded corners can't be scaled non-uniformly). */
 export function roundedBox(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
   const rr = Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3);
-  return cachedGeo(`rb:${w}:${h}:${d}:${rr}`, () => new RoundedBoxGeometry(w, h, d, 3, Math.max(rr, 1e-3)));
+  // tiny radii read the same with fewer segments (a 3-segment rounded box is ~600 triangles)
+  const segs = rr <= 0.015 ? 1 : rr <= 0.04 ? 2 : 3;
+  return cachedGeo(`rb:${w}:${h}:${d}:${rr}`, () => new RoundedBoxGeometry(w, h, d, segs, Math.max(rr, 1e-3)));
+}
+
+/**
+ * Rounded rectangle centred at world (cx, cz), in the shape plane used by
+ * `flatSlab` (shape y = −world z). Pass `path` to get a hole instead of a shape.
+ */
+export function roundedRectAt(cx: number, cz: number, w: number, d: number, r: number, path: THREE.Path = new THREE.Shape()): THREE.Path {
+  const x = cx - w / 2, y = -cz - d / 2;
+  const rr = Math.min(r, w / 2, d / 2);
+  path.moveTo(x + rr, y);
+  path.lineTo(x + w - rr, y);
+  path.quadraticCurveTo(x + w, y, x + w, y + rr);
+  path.lineTo(x + w, y + d - rr);
+  path.quadraticCurveTo(x + w, y + d, x + w - rr, y + d);
+  path.lineTo(x + rr, y + d);
+  path.quadraticCurveTo(x, y + d, x, y + d - rr);
+  path.lineTo(x, y + rr);
+  path.quadraticCurveTo(x, y, x + rr, y);
+  return path;
 }
 
 /** Rounded-rectangle outline in the XY plane (used for flat lawns and pads). */

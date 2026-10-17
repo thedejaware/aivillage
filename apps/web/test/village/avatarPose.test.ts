@@ -31,7 +31,8 @@ describe("avatar pose", () => {
 
   it("standing feet stay on the floor (hips never sink below leg reach)", () => {
     for (const a of BODY_ANIMS) {
-      if (a === "sit" || a === "sleep") continue;
+      // seated / lying / swimming bodies don't stand on their feet
+      if (["sit", "sleep", "watch", "ride", "bike", "swim"].includes(a)) continue;
       for (const t of [0.2, 0.9, 1.6]) {
         const r = samplePose(pose(a, t), 0.4, restRig());
         // lowest ankle sits at its rest height (0.02) plus any hop (r.y)

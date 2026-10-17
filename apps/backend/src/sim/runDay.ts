@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   toWorldState, DEFAULT_ZONES, DAILY_ENERGY, labelFor, isOrderActive,
-  resolveAction, findAction, consentGiven, ACT_HOLD_MS,
+  resolveAction, findAction, consentGiven, actHoldMs,
   type WorldState, type Twin, type Memory, type Structure, type LlmClient,
   type BeatResult, type SocialMove
 } from "@aivillage/shared";
@@ -15,6 +15,7 @@ import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
 import { spendBeat } from "../economy/energy.js";
 import { planBeat } from "../agent/planner.js";
 import { converse } from "./conversation.js";
+import { isBusyNow, isSettledNow, staminaAfter, staminaOf } from "./activity.js";
 
 export interface DayResult {
   /** One WorldState snapshot per beat — the client plays these back over time. */
@@ -154,6 +155,15 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
   };
   const patrolFor = (twinId: string, beat: number) => WORK_PATROL[(beat + hashId(twinId)) % WORK_PATROL.length];
 
+  // Busy twins (swimming, riding, asleep…) can't be pulled into a scene; settled ones
+  // (eating at the café, watching a film…) have scenes come to them and aren't moved.
+  const busyIds = new Set(loaded.filter((t) => isBusyNow(t, runStartedAt)).map((t) => t.id));
+  const settledIds = new Set(loaded.filter((t) => isSettledNow(t, runStartedAt)).map((t) => t.id));
+  const isBusyName = (name: string | null | undefined) => {
+    const t = name ? twinByName.get(name) : undefined;
+    return Boolean(t && busyIds.has(t.id));
+  };
+
   // Owner orders: a twin following its owner's order stays put — scenes come to it.
   const orderZone = (t: Twin): string | null => (isOrderActive(t.order, runStartedAt) ? t.order!.zone : null);
   const sceneVenue = (actor: Twin, target: Twin, fallback: string): string =>
@@ -194,7 +204,7 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           w.pending = await planBeat(
             w.twin,
             {
-              nearbyTwinNames: allNames.filter((n) => n !== w.twin.name).slice(0, 5),
+              nearbyTwinNames: allNames.filter((n) => n !== w.twin.name && !isBusyName(n)).slice(0, 5),
               recentMemories: [...w.recent].slice(-3).reverse(),
               relationships: relations,
               ownerFacts: w.ownerFacts
@@ -227,18 +237,19 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
       actorOffset: { dc: number; dr: number },
       targetOffset: { dc: number; dr: number }
     ) => {
-      const vz = zoneByName.get(venueZone)!;
+      const vz = zoneByName.get(venueZone) ?? DEFAULT_ZONES[0];
       const spread = nextSceneOffset(venueZone);
-      positions[actorId] = { col: vz.col + actorOffset.dc + spread.dc, row: vz.row + actorOffset.dr + spread.dr };
-      positions[targetId] = { col: vz.col + targetOffset.dc + spread.dc, row: vz.row + targetOffset.dr + spread.dr };
+      // a settled twin stays exactly where it is doing its thing
+      if (!settledIds.has(actorId)) positions[actorId] = { col: vz.col + actorOffset.dc + spread.dc, row: vz.row + actorOffset.dr + spread.dr };
+      if (!settledIds.has(targetId)) positions[targetId] = { col: vz.col + targetOffset.dc + spread.dc, row: vz.row + targetOffset.dr + spread.dr };
       placedThisBeat.add(actorId);
       placedThisBeat.add(targetId);
     };
 
     // Helper: update locationZone for actor (WorkingTwin) and optionally the target.
     const updateZones = (actorW: WorkingTwin, targetTwin: Twin | undefined, zone: string) => {
-      actorW.twin = { ...actorW.twin, locationZone: zone };
-      if (targetTwin) {
+      if (!settledIds.has(actorW.twin.id)) actorW.twin = { ...actorW.twin, locationZone: zone };
+      if (targetTwin && !settledIds.has(targetTwin.id)) {
         const targetW = work.find((ww) => ww.twin.id === targetTwin.id);
         if (targetW) targetW.twin = { ...targetW.twin, locationZone: zone };
       }
@@ -274,7 +285,8 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
         }
       }
 
-      const targetTwin = beatResult.target ? twinByName.get(beatResult.target) : undefined;
+      // a busy twin is out of reach until its activity ends
+      const targetTwin = beatResult.target && !isBusyName(beatResult.target) ? twinByName.get(beatResult.target) : undefined;
 
       if (beatResult.verb === "chat" && targetTwin && targetTwin.id !== w.twin.id) {
         try {
@@ -348,7 +360,7 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
         }
       } else if (beatResult.verb === "act" && beatResult.action && !orderZone(w.twin)) {
         // v4: the twin's own AI picked a real action — the client walks there and performs it.
-        const res = resolveAction({ action: beatResult.action, target: beatResult.target, emoji: beatResult.emoji });
+        const res = resolveAction({ action: beatResult.action, target: isBusyName(beatResult.target) ? null : beatResult.target, emoji: beatResult.emoji });
         const partner = res.ok && res.action.targetName ? twinByName.get(res.action.targetName) : undefined;
         if (!res.ok || (res.action.targetName && (!partner || partner.id === w.twin.id))) {
           // unsafe, impossible or no such partner: nothing happens
@@ -360,15 +372,17 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           const refused = partner && def ? !consentGiven(def, scoreOf(partner.id, w.twin.id)) : false;
           const action = { ...res.action, ...(partner ? { refused } : {}) };
           const partnerZone = partner ? (work.find((ww) => ww.twin.id === partner.id)?.twin ?? partner).locationZone : null;
-          const zone = partnerZone ?? action.place ?? w.twin.locationZone;
+          // a place activity happens at the place (a partner is invited along); touch goes to the partner
+          const zone = (action.place && zoneByName.has(action.place) ? action.place : null) ?? partnerZone ?? action.place ?? w.twin.locationZone;
           w.twin = {
             ...w.twin,
             locationZone: zone,
+            stamina: staminaAfter(staminaOf(w.twin), action, zone),
             order: {
               kind: "act", auto: true, zone, targetName: partner?.name ?? null,
               label: partner ? `${action.label} ${partner.name}` : action.label,
               issuedAt: runStartedAt.toISOString(),
-              holdUntil: new Date(runStartedAt.getTime() + ACT_HOLD_MS).toISOString(),
+              holdUntil: new Date(runStartedAt.getTime() + actHoldMs(action)).toISOString(),
               action
             }
           };

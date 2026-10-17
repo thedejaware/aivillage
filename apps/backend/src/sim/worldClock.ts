@@ -1,8 +1,9 @@
-import { CHATTINESS_PACE, isOrderActive, type Chattiness, type LlmClient, type Twin, type WorldState } from "@aivillage/shared";
+import { CHATTINESS_PACE, isOrderActive, placeOf, type Chattiness, type LlmClient, type Twin, type WorldState } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
 import { getDb } from "../db/appDb.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { runDay } from "./runDay.js";
+import { claimTwins, isClaimed, releaseTwins } from "./twinLocks.js";
 
 /**
  * v4: the village lives while the player watches — and pauses when the app is
@@ -18,10 +19,16 @@ export function tickIntervalMs(chattiness: Chattiness): number {
 
 /**
  * Pick which twins act this tick. Pure & testable. Twins following their
- * owner's order are busy and never picked.
+ * owner's order are never picked, nor twins busy at a busy place (swimming,
+ * riding, asleep…); a twin doing something calm (café, cinema, lawn…) can be —
+ * its scene happens right where it is.
  */
 export function pickActors(twins: Twin[], opts: { maxActors: number; now: Date; random: () => number }): Twin[] {
-  const pool = twins.filter((t) => !isOrderActive(t.order, opts.now));
+  const pool = twins.filter((t) => {
+    if (!isOrderActive(t.order, opts.now)) return true;
+    if (!t.order!.auto) return false;
+    return !placeOf(t.order!.zone)?.busy;
+  });
   const chosen: Twin[] = [];
   while (pool.length > 0 && chosen.length < opts.maxActors) {
     chosen.push(pool.splice(Math.floor(opts.random() * pool.length), 1)[0]);
@@ -55,11 +62,17 @@ export function startWorldClock(opts: WorldClockOptions): WorldClock {
   /** a couple of twins take one AI beat each */
   const defaultRunTick = async (llm: LlmClient, chattiness: Chattiness): Promise<WorldState[]> => {
     const db = opts.db ?? getDb();
-    const actors = pickActors(await new DrizzleTwinRepository(db).listAll(), {
-      maxActors: CHATTINESS_PACE[chattiness].actors, now: now(), random
-    });
+    const free = (await new DrizzleTwinRepository(db).listAll()).filter((t) => !isClaimed(t.id));
+    const actors = pickActors(free, { maxActors: CHATTINESS_PACE[chattiness].actors, now: now(), random });
     if (actors.length === 0) return [];
-    return (await runDay(llm, { onlyTwinIds: actors.map((a) => a.id), beats: 1, db })).frames;
+    // the next-step loop leaves these twins alone while their beat is being decided
+    const ids = actors.map((a) => a.id);
+    claimTwins(ids);
+    try {
+      return (await runDay(llm, { onlyTwinIds: ids, beats: 1, db })).frames;
+    } finally {
+      releaseTwins(ids);
+    }
   };
   const runTick = opts.runTick ?? defaultRunTick;
   let running = false;

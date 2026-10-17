@@ -3,12 +3,12 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { io } from "socket.io-client";
-import { ZONE_DISPLAY, orderStatus } from "@aivillage/shared";
+import { io, type Socket } from "socket.io-client";
+import { ZONE_DISPLAY, orderStatus, TIRED_BELOW, MAX_STAMINA } from "@aivillage/shared";
 import type { WorldState, WorldTwinView, Twin, Memory, Approval, TwinDetail, VillageInfo } from "@aivillage/shared";
 import { zoneOfTile } from "../lib/village/layout";
+import { shouldPause } from "../lib/village/presence";
 import { TopBar } from "../components/hud/TopBar";
-import { StatCards } from "../components/hud/StatCards";
 import { Inspector } from "../components/hud/Inspector";
 import { VillagerList, type VillagerRow } from "../components/hud/VillagerList";
 import { OrderTracker } from "../components/hud/OrderTracker";
@@ -70,6 +70,8 @@ export default function Page() {
   const router = useRouter();
   const [state, setState] = useState<WorldState | null>(null);
   const [live, setLive] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [myTwinId, setMyTwinId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -220,6 +222,7 @@ export default function Page() {
 
   useEffect(() => {
     const socket = io(API, { transports: ["websocket", "polling"] });
+    socketRef.current = socket;
     socket.on("connect", () => setLive(true));
     socket.on("disconnect", () => setLive(false));
     socket.on("world", (w: WorldState) => {
@@ -233,8 +236,66 @@ export default function Page() {
     return () => {
       playGen.current += 1; // cancel any in-flight playback
       socket.disconnect();
+      socketRef.current = null;
     };
   }, [playEpisode]);
+
+  /**
+   * Auto-pause: while any browser is connected the server keeps the village —
+   * and its AI calls — running. A tab hidden for a minute, or left without any
+   * input for 10 minutes, disconnects; the owner's click / key / return resumes.
+   */
+  useEffect(() => {
+    let lastInputAt = Date.now();
+    let hiddenSince: number | null = document.hidden ? Date.now() : null;
+    let pausedNow = false;
+    const pause = () => {
+      if (pausedNow) return;
+      pausedNow = true;
+      playGen.current += 1;
+      socketRef.current?.disconnect();
+      setPaused(true);
+    };
+    const resume = () => {
+      lastInputAt = Date.now();
+      if (!pausedNow) return;
+      pausedNow = false;
+      hiddenSince = null;
+      socketRef.current?.connect();
+      setPaused(false);
+    };
+    const onInput = () => {
+      if (pausedNow) resume();
+      else lastInputAt = Date.now();
+    };
+    const onMove = () => { if (!pausedNow) lastInputAt = Date.now(); }; // a moving mouse alone doesn't resume
+    const onVisibility = () => {
+      if (document.hidden) hiddenSince = Date.now();
+      else {
+        hiddenSince = null;
+        resume();
+      }
+    };
+    const check = () => {
+      if (!pausedNow && shouldPause({ hidden: document.hidden, hiddenSince, lastInputAt, now: Date.now() })) pause();
+    };
+    const h = setInterval(check, 5_000);
+    window.addEventListener("pointerdown", onInput);
+    window.addEventListener("keydown", onInput);
+    window.addEventListener("wheel", onMove, { passive: true });
+    window.addEventListener("touchstart", onInput, { passive: true });
+    window.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(h);
+      window.removeEventListener("pointerdown", onInput);
+      window.removeEventListener("keydown", onInput);
+      window.removeEventListener("wheel", onMove);
+      window.removeEventListener("touchstart", onInput);
+      window.removeEventListener("pointermove", onMove);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   // ---- my twin + its order ----
   const myView = state?.twins.find((t) => t.id === myTwinId) ?? null;
@@ -308,7 +369,9 @@ export default function Page() {
             id: t.id,
             name: t.name,
             colorHex: t.colorHex,
+            zone: zoneOfTile(t.col, t.row),
             zoneLabel: ZONE_DISPLAY[zoneOfTile(t.col, t.row)] ?? "",
+            tired: (t.stamina ?? MAX_STAMINA) < TIRED_BELOW,
             status: speaking ? "💬 Talking" : t.order ? orderStatus(t.order, arrived || !!t.order.auto) : "Roaming",
             tone: speaking ? ("blue" as const) : t.order ? ("amber" as const) : ("grey" as const),
             isMine,
@@ -318,27 +381,6 @@ export default function Page() {
         .sort((a, b) => Number(b.isMine) - Number(a.isMine) || (b.popularity ?? 0) - (a.popularity ?? 0)),
     [state, myTwinId, arrivedKey, speakingId, popularity]
   );
-
-  const myRank = panel?.leaderboard ? panel.leaderboard.findIndex((r) => r.twinId === myTwinId) + 1 : 0;
-  const friends = (panel?.relationships ?? []).filter((r) => r.score > 0).length;
-  const rivals = (panel?.relationships ?? []).filter((r) => r.score < 0).length;
-  const pending = panel?.approvals.length ?? 0;
-  const stats = [
-    { key: "villagers", icon: "🏘️", label: "Villagers", value: String(state?.twins.length ?? "–"), sub: "living on the island" },
-    ...(userId
-      ? [
-          {
-            key: "rank", icon: "🏆", label: "Your rank", value: myRank > 0 ? `#${myRank}` : "–",
-            sub: `popularity ${popularity.get(myTwinId ?? "") ?? 0}`
-          },
-          { key: "friends", icon: "💛", label: "Friends", value: String(friends), sub: `${rivals} rival${rivals === 1 ? "" : "s"}` },
-          {
-            key: "needs", icon: "🔔", label: "Needs you", value: String(pending), sub: "decisions waiting",
-            ...(pending > 0 ? { delta: { text: "now", tone: "red" as const } } : {})
-          }
-        ]
-      : [])
-  ];
 
   const inspectorOpen = selectedId !== null;
 
@@ -354,6 +396,7 @@ export default function Page() {
           onOrderArrive={onOrderArrive}
           focusRequest={focusRequest}
           controlsRight={inspectorOpen ? 16 + INSPECTOR_WIDTH + 12 : 16}
+          paused={paused}
         />
       ) : (
         <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: C.muted, fontSize: 14 }}>
@@ -381,7 +424,6 @@ export default function Page() {
         </a>
       )}
 
-      <StatCards stats={stats} style={{ top: 80 }} />
 
       {/* ---- needs your decision (owner-gated big moves) ---- */}
       {panel && panel.approvals.length > 0 && (
@@ -438,6 +480,24 @@ export default function Page() {
       </div>
 
       <VillagerList villagers={villagers} selectedId={selectedId} onSelect={(id) => select(id, true)} />
+
+      {/* ---- auto-pause: nobody watching → no AI spending ---- */}
+      {paused && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Continue the village"
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(16,24,40,0.45)", backdropFilter: "blur(3px)", cursor: "pointer", padding: 16
+          }}
+        >
+          <div style={{ ...card, padding: "20px 24px", maxWidth: 420, textAlign: "center", color: C.text, fontSize: 15, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>⏸ Your village is resting</div>
+            No AI is used while it&apos;s paused. Click anywhere to continue.
+          </div>
+        </div>
+      )}
 
     </main>
   );

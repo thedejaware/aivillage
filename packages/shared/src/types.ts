@@ -27,6 +27,8 @@ export interface Twin {
   active?: boolean;
   /** exact spot saved by the browser so the village resumes where it was left */
   pose?: TwinPose | null;
+  /** tiredness: 0–100 (MAX_STAMINA); absent = fully rested. Shown as "Energy". */
+  stamina?: number;
 }
 
 export type TwinRole = "main" | "villager";
@@ -37,7 +39,12 @@ export interface TwinPose {
   z: number;
   yaw: number;
   zone: string;
+  /** map version the pose was saved on; poses from another map are ignored */
+  layout?: number;
 }
+
+/** The current map (Main Street). Bump when the map changes so old saved poses are ignored. */
+export const LAYOUT_VERSION = 2;
 
 export interface Wallet {
   userId: string;
@@ -53,7 +60,7 @@ export interface ProjectCost {
   creditCost: number;
 }
 
-/** Daily energy granted to every twin. This cap is the per-user inference ceiling. */
+/** Legacy beat budget for runDay (not shown to players — "Energy" in the UI is `stamina`). */
 export const DAILY_ENERGY = 5;
 
 // --- Wave 1a additions ---

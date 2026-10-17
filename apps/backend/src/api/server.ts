@@ -6,6 +6,7 @@ import { Server as IOServer } from "socket.io";
 import type { VillageSettings } from "@aivillage/shared";
 import { runDay } from "../sim/runDay.js";
 import { startWorldClock } from "../sim/worldClock.js";
+import { startNextStepLoop } from "../sim/nextStepLoop.js";
 import { chatWithTwin, chatHistory, releaseTwin } from "../chat/twinChat.js";
 import { talkOnArrival, TalkScheduler } from "../sim/orderedTalk.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
@@ -351,6 +352,13 @@ ensureLocalOwner(getDb())
     // The village lives while someone watches; closing the app pauses it.
     startWorldClock({
       emitFrames: (frames) => io.emit("day", { frames }),
+      isWatched: () => io.engine.clientsCount > 0,
+      getLlm: () => ai.llm(),
+      getChattiness: () => ai.chattiness()
+    });
+    // Each twin that finishes an activity takes the next one from its plan (O13, to-do list mode).
+    startNextStepLoop({
+      emitWorld,
       isWatched: () => io.engine.clientsCount > 0,
       getLlm: () => ai.llm(),
       getChattiness: () => ai.chattiness()

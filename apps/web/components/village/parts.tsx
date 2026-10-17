@@ -43,10 +43,10 @@ export function Cyl({ rad, h, p, r, m, cast = true, receive = true, low = false 
   );
 }
 
-export function Ball({ rad, p, m, cast = true, scale }: MeshBits & { rad: number; scale?: V3 }) {
+export function Ball({ rad, p, m, cast = true, scale, low = false }: MeshBits & { rad: number; scale?: V3; low?: boolean }) {
   return (
     <mesh
-      geometry={unit.ball()} scale={scale ? [rad * scale[0], rad * scale[1], rad * scale[2]] : rad}
+      geometry={low ? unit.ballLow() : unit.ball()} scale={scale ? [rad * scale[0], rad * scale[1], rad * scale[2]] : rad}
       position={p} material={m} castShadow={cast}
     />
   );
@@ -164,7 +164,7 @@ export function FlowerBed({ x, z, w = 0.6, d = 0.3, seed = 1, rot = 0 }: { x: nu
       <RBox size={[w, 0.09, d]} radius={0.03} p={[0, 0.045, 0]} m={solid(P.wood, 0.8)} />
       <Box size={[w - 0.06, 0.02, d - 0.06]} p={[0, 0.09, 0]} m={solid(P.foliageDark, 0.95)} cast={false} />
       {flowers.map((f, i) => (
-        <Ball key={i} rad={0.028} p={[f.x, 0.125, f.z]} m={solid(f.c, 0.6)} cast={false} />
+        <Ball key={i} rad={0.028} p={[f.x, 0.125, f.z]} m={solid(f.c, 0.6)} cast={false} low />
       ))}
     </group>
   );
@@ -172,9 +172,31 @@ export function FlowerBed({ x, z, w = 0.6, d = 0.3, seed = 1, rot = 0 }: { x: nu
 
 const BATCH_ATTRS = ["position", "normal", "uv"] as const;
 
+/** Plain matte materials (no texture, glow or transparency) can share one vertex-coloured material. */
+function isPlain(m: THREE.Material): m is THREE.MeshStandardMaterial {
+  const s = m as THREE.MeshStandardMaterial;
+  return (
+    s.isMeshStandardMaterial === true && !s.transparent && !s.map && s.metalness === 0 &&
+    (s.emissiveIntensity === 0 || (s.emissive.r === 0 && s.emissive.g === 0 && s.emissive.b === 0))
+  );
+}
+
+const vcMats = new Map<string, THREE.MeshStandardMaterial>();
+function vertexColorMaterial(rough: number, flat: boolean): THREE.MeshStandardMaterial {
+  const key = `${rough}|${flat}`;
+  let m = vcMats.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color: "#ffffff", vertexColors: true, roughness: rough, metalness: 0, flatShading: flat });
+    vcMats.set(key, m);
+  }
+  return m;
+}
+
 /**
- * Renders static children once, then replaces them with one merged mesh per
- * material (and shadow flags) — hundreds of props become a few draw calls.
+ * Renders static children once, then replaces them with merged meshes:
+ * every plain matte colour folds into one vertex-coloured mesh per roughness
+ * (and shadow flags); glowing, see-through or textured materials get one
+ * merged mesh each. Hundreds of props become a few dozen draw calls.
  * Children must be plain meshes: no lights, Html, refs or animation.
  */
 export function StaticBatch({ children }: { children: ReactNode }) {
@@ -199,10 +221,23 @@ export function StaticBatch({ children }: { children: ReactNode }) {
       if (!geo.attributes.normal) geo.computeVertexNormals();
       geo.clearGroups();
       geo.applyMatrix4(local.multiplyMatrices(inv, m.matrixWorld));
-      const key = `${m.material.uuid}|${m.castShadow}|${m.receiveShadow}`;
+      let mat: THREE.Material = m.material;
+      let key: string;
+      if (isPlain(mat)) {
+        const c = mat.color;
+        const n = geo.attributes.position.count;
+        const col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+        geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        mat = vertexColorMaterial(mat.roughness, mat.flatShading);
+        key = `vc|${mat.uuid}`;
+      } else {
+        key = mat.uuid;
+      }
+      key += `|${m.castShadow}|${m.receiveShadow}`;
       let b = buckets.get(key);
       if (!b) {
-        b = { mat: m.material, cast: m.castShadow, receive: m.receiveShadow, geos: [] };
+        b = { mat, cast: m.castShadow, receive: m.receiveShadow, geos: [] };
         buckets.set(key, b);
       }
       b.geos.push(geo);

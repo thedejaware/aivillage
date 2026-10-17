@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import type { Twin, TwinRepository, TwinRole } from "@aivillage/shared";
+import { MAX_STAMINA, type Twin, type TwinRepository, type TwinRole } from "@aivillage/shared";
 import type { DB } from "./client.js";
 import { twins } from "./schema.js";
 
@@ -23,7 +23,8 @@ function toTwin(r: Row): Twin {
     ...(r.appearance ? { appearance: r.appearance } : {}),
     role: (r.role === "main" ? "main" : "villager") as TwinRole,
     active: r.active,
-    pose: r.pose ?? null
+    pose: r.pose ?? null,
+    stamina: r.stamina ?? MAX_STAMINA
   };
 }
 
@@ -53,7 +54,8 @@ export class DrizzleTwinRepository implements TwinRepository {
       appearance: twin.appearance ?? null,
       role: twin.role ?? "villager",
       active: twin.active ?? true,
-      pose: twin.pose ?? null
+      pose: twin.pose ?? null,
+      stamina: twin.stamina ?? MAX_STAMINA
     };
     await this.db.insert(twins).values(row).onConflictDoUpdate({ target: twins.id, set: row });
   }

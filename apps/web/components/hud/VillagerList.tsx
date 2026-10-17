@@ -2,18 +2,22 @@
 
 /**
  * VillagerList — WareTrack's bottom-right tabbed list: every villager (with
- * where they are and what they're up to) and the four venues with headcounts.
+ * where they are and what they're up to) and every place with headcounts.
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ZONE_DISPLAY, ZONE_TAGLINE } from "@aivillage/shared";
+import { ZONE_DISPLAY, ZONE_EMOJI, ZONE_TAGLINE } from "@aivillage/shared";
 import { C, FONT, Z, card, hex, iconButton, pill, type Tone } from "./theme";
 
 export interface VillagerRow {
   id: string;
   name: string;
   colorHex: number;
+  /** zone id of the place nearest the twin */
+  zone?: string;
   zoneLabel: string;
+  /** energy below the tired line: shows 😴 */
+  tired?: boolean;
   status: string;
   tone: Tone;
   isMine: boolean;
@@ -55,8 +59,8 @@ export function VillagerList({
   const venues = useMemo(
     () =>
       Object.entries(ZONE_DISPLAY).map(([zone, label]) => {
-        const here = villagers.filter((v) => v.zoneLabel === label);
-        return { zone, label, tagline: ZONE_TAGLINE[zone] ?? "", count: here.length, names: here.map((v) => v.name) };
+        const here = villagers.filter((v) => (v.zone ? v.zone === zone : v.zoneLabel === label));
+        return { zone, label, emoji: ZONE_EMOJI[zone] ?? "📍", tagline: ZONE_TAGLINE[zone] ?? "", count: here.length, names: here.map((v) => v.name) };
       }),
     [villagers]
   );
@@ -124,10 +128,11 @@ export function VillagerList({
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</span>
+                        {v.tired && <span title="Tired" aria-label="tired">😴</span>}
                         {v.isMine && <span style={{ ...pill("blue"), padding: "1px 6px", fontSize: 10 }}>you</span>}
                       </span>
                       <span style={{ display: "block", fontSize: 11.5, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {v.zoneLabel}{typeof v.popularity === "number" ? ` · ★ ${v.popularity}` : ""}
+                        {v.zone && ZONE_EMOJI[v.zone] ? `${ZONE_EMOJI[v.zone]} ` : ""}{v.zoneLabel}{typeof v.popularity === "number" ? ` · ★ ${v.popularity}` : ""}
                       </span>
                     </span>
                     <span style={{ ...pill(v.tone), maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>{v.status}</span>
@@ -140,7 +145,7 @@ export function VillagerList({
             venues.map((z) => (
               <div key={z.zone} style={{ minHeight: ROW_H, display: "flex", alignItems: "center", gap: 10, padding: "6px 16px" }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{z.label}</span>
+                  <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{z.emoji} {z.label}</span>
                   <span style={{ display: "block", fontSize: 11.5, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {z.names.length > 0 ? z.names.join(", ") : z.tagline}
                   </span>

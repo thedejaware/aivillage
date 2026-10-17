@@ -27,6 +27,7 @@ const CREATE_SQL = `
     role text not null default 'villager',
     active boolean not null default true,
     pose jsonb,
+    stamina integer not null default 100,
     created_at timestamptz not null default now()
   );
   create table credit_ledger (

@@ -31,6 +31,8 @@ export const twins = pgTable("twins", {
   active: boolean("active").notNull().default(true),
   /** exact spot saved by the browser (resume where the player left) */
   pose: jsonb("pose").$type<TwinPose | null>(),
+  /** tiredness 0–100 ("Energy" in the UI); old rows default to fully rested */
+  stamina: integer("stamina").notNull().default(100),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 

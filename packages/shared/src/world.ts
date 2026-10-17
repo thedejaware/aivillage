@@ -1,4 +1,5 @@
-import type { Twin, Structure, ProjectType, TwinPose } from "./types.js";
+import { LAYOUT_VERSION, type Twin, type Structure, type ProjectType, type TwinPose } from "./types.js";
+import { MAX_STAMINA } from "./places.js";
 import { validateAppearance, type Appearance } from "./appearance.js";
 import { isOrderActive, type OwnerOrder } from "./orders.js";
 
@@ -24,6 +25,8 @@ export interface WorldTwinView {
   isMain: boolean;
   /** saved exact spot, if any (the renderer starts the twin there) */
   pose: TwinPose | null;
+  /** energy 0–100 */
+  stamina: number;
 }
 
 export interface WorldStructureView {
@@ -42,12 +45,23 @@ export interface WorldState {
   structures: WorldStructureView[];
 }
 
-/** Canonical zone layout shared by the backend (state building) and the renderer. */
+/**
+ * Canonical zone layout shared by the backend (state building) and the renderer.
+ * Main Street map (LAYOUT_VERSION 2): world = tile − 3.5; one winding street
+ * from the house (west) to the rollercoaster (east). The first entry is the fallback zone.
+ */
 export const DEFAULT_ZONES: WorldZone[] = [
-  { name: "plaza", col: 3, row: 3 },
-  { name: "maker_space", col: 0, row: 5 },
-  { name: "network_hub", col: 6, row: 0 },
-  { name: "event_space", col: 6, row: 6 }
+  { name: "plaza", col: 4, row: 1 },
+  { name: "home", col: -6, row: 3 },
+  { name: "network_hub", col: -4, row: -2 },
+  { name: "bike_rack", col: -5, row: 6 },
+  { name: "maker_space", col: -1, row: 6 },
+  { name: "garden", col: 2, row: 8 },
+  { name: "gym", col: 7, row: -2 },
+  { name: "event_space", col: 7, row: 8 },
+  { name: "pool", col: 11, row: 0 },
+  { name: "cinema", col: 11, row: 9 },
+  { name: "funfair", col: 13, row: 4 }
 ];
 
 // Drama-village venue identity: zone ids stay stable (DB, planner), but every
@@ -56,14 +70,28 @@ export const ZONE_DISPLAY: Record<string, string> = {
   plaza: "THE STAGE",
   maker_space: "THE CAFÉ",
   network_hub: "QUIET CORNER",
-  event_space: "THE LAWN"
+  event_space: "THE LAWN",
+  home: "THE HOUSE",
+  garden: "THE GARDEN",
+  gym: "THE GYM",
+  pool: "THE POOL",
+  cinema: "THE CINEMA",
+  funfair: "THE ROLLERCOASTER",
+  bike_rack: "THE BIKES"
 };
 
 export const ZONE_TAGLINE: Record<string, string> = {
   plaza: "big moves happen here",
-  maker_space: "chats & gossip",
-  network_hub: "schemes are hatched",
-  event_space: "friendships grow"
+  maker_space: "eat, drink & gossip",
+  network_hub: "rest and think",
+  event_space: "friendships grow",
+  home: "sleep and get energy back",
+  garden: "grow veg, make juice",
+  gym: "get strong",
+  pool: "swim and sunbathe",
+  cinema: "movies under the sky",
+  funfair: "scream on the drop",
+  bike_rack: "ride along the street"
 };
 
 const PALETTE = [0xff9a5b, 0x3ddc97, 0xffd166, 0x5b8cff, 0xc98cff, 0xff6f9c, 0x5be0c8];
@@ -161,7 +189,9 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
         : null,
       appearance: validateAppearance(t.appearance),
       isMain: t.role === "main",
-      pose: t.pose ?? null
+      // a pose saved on an older map would put the twin somewhere odd
+      pose: t.pose && t.pose.layout === LAYOUT_VERSION ? t.pose : null,
+      stamina: t.stamina ?? MAX_STAMINA
     };
   });
 
@@ -184,7 +214,8 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
 
 /** What each venue looks like when a twin hangs out there. */
 export const ZONE_EMOJI: Record<string, string> = {
-  maker_space: "☕", event_space: "🌸", network_hub: "💭", plaza: "🎤"
+  maker_space: "☕", event_space: "🌸", network_hub: "💭", plaza: "🎤",
+  home: "🏠", garden: "🥕", gym: "🏋️", pool: "🏊", cinema: "🎬", funfair: "🎢", bike_rack: "🚲"
 };
 
 /** One-line status for a twin following an owner order (3D label + chat panel). */
@@ -213,8 +244,10 @@ export interface TwinDetail {
   zone: string;
   zoneLabel: string;
   reputation: number;
-  /** 0..DAILY_ENERGY */
+  /** legacy beat budget (not shown) */
   energy: number;
+  /** energy 0–100, shown as "Energy" */
+  stamina: number;
   popularity: number;
   /** 1-based leaderboard position */
   rank: number;

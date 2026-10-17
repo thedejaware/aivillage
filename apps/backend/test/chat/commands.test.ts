@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { Twin } from "@aivillage/shared";
-import { ORDER_HOLD_MS, ACT_HOLD_MS } from "@aivillage/shared";
-import { parseCommand, applyCommand, commandAck } from "../../src/chat/commands.js";
+import { ORDER_HOLD_MS, actHoldMs, findAction } from "@aivillage/shared";
+import { parseCommand, applyCommand, commandAck, normalizeZone } from "../../src/chat/commands.js";
 
-const VILLAGERS = ["Ravi", "Aiko", "Daniel Park"];
+const VILLAGERS = ["Ravi", "Aiko", "Daniel Park", "Sena"];
 
 describe("parseCommand: go", () => {
   it.each([
@@ -146,7 +146,7 @@ describe("applyCommand: act", () => {
     const out = applyCommand(me, { type: "act", action: "jump", target: null }, [me, ravi], NOW);
     expect(out.changed).toBe(true);
     expect(out.twin.order).toMatchObject({ kind: "act", zone: "plaza", targetName: null, action: { id: "jump", anim: "jump" } });
-    expect(Date.parse(out.twin.order!.holdUntil) - NOW.getTime()).toBe(ACT_HOLD_MS);
+    expect(Date.parse(out.twin.order!.holdUntil) - NOW.getTime()).toBe(actHoldMs(findAction("jump")!));
   });
 
   it("a placed action walks to its place first (wash hands → the café)", () => {
@@ -189,5 +189,112 @@ describe("commandAck: act", () => {
   it("confirms actions and passes on messages", () => {
     expect(commandAck("Memo", { type: "act", action: "jump", target: null })).toMatch(/jump/i);
     expect(commandAck("Memo", { type: "talk_to", targetName: "Ravi", message: "dinner is ready" })).toContain("Ravi");
+  });
+});
+
+describe("parseCommand: Main Street places", () => {
+  it.each([
+    ["go swimming", "swim", null],
+    ["work out", "work_out", null],
+    ["go to the gym", "work_out", null],
+    ["ride a bike", "ride_bike", null],
+    ["watch a movie", "watch_movie", null],
+    ["take Sena to the cinema", "watch_movie", "Sena"],
+    ["please take ravi to the pool", "swim", "Ravi"],
+    ["take Aiko swimming", "swim", "Aiko"],
+    ["go swimming with Sena", "swim", "Sena"],
+    ["ride the rollercoaster", "ride_coaster", null],
+    ["pick vegetables", "garden", null],
+    ["garden", "garden", null],
+    ["make juice", "drink_juice", null],
+    ["go home", "sleep", null],
+    ["go to sleep", "sleep", null],
+    ["sunbathe", "sunbathe", null]
+  ])("%s → %s", (msg, action, target) => {
+    expect(parseCommand(msg, VILLAGERS)).toEqual({ type: "act", action, target });
+  });
+
+  it("'run to X' is still a walk, 'run' alone is the treadmill", () => {
+    expect(parseCommand("run to the cafe", VILLAGERS)).toEqual({ type: "go", zone: "maker_space" });
+    expect(parseCommand("run", VILLAGERS)).toEqual({ type: "act", action: "run", target: null });
+  });
+
+  it("going to a new place by name", () => {
+    expect(parseCommand("go to the garden", VILLAGERS)).toEqual({ type: "go", zone: "garden" });
+    expect(parseCommand("walk to the house", VILLAGERS)).toEqual({ type: "go", zone: "home" });
+  });
+});
+
+describe("normalizeZone: new places", () => {
+  it.each([
+    ["gym", "gym"], ["the pool", "pool"], ["cinema", "cinema"], ["the movies", "cinema"], ["garden", "garden"],
+    ["home", "home"], ["the house", "home"], ["coaster", "funfair"], ["rollercoaster", "funfair"], ["roller coaster", "funfair"],
+    ["funfair", "funfair"], ["lunapark", "funfair"], ["bike", "bike_rack"], ["the bikes", "bike_rack"], ["THE ROLLERCOASTER", "funfair"]
+  ])("%s → %s", (raw, zone) => {
+    expect(normalizeZone(raw)).toBe(zone);
+  });
+});
+
+describe("applyCommand: energy", () => {
+  const sena: Twin = { ...ravi, id: "sena", name: "Sena", locationZone: "maker_space" };
+  const all = (t: Twin) => [t, ravi, sena];
+
+  it("starting an activity spends (or restores) energy and holds for its own length", () => {
+    const fresh = { ...me, stamina: 80 };
+    const swim = applyCommand(fresh, { type: "act", action: "swim", target: null }, all(fresh), NOW);
+    expect(swim.twin.stamina).toBe(55);
+    expect(swim.twin.order).toMatchObject({ kind: "act", zone: "pool", action: { id: "swim" } });
+    expect(Date.parse(swim.twin.order!.holdUntil) - NOW.getTime()).toBe(actHoldMs(findAction("swim")!));
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "act", action: "drink_coffee", target: null }, all(me), NOW).twin.stamina).toBe(65);
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "home" }, all(me), NOW).twin.stamina).toBe(100);
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "gym" }, all(me), NOW).twin.stamina).toBe(25);
+  });
+
+  it("a twin without stored energy counts as rested", () => {
+    expect(applyCommand(me, { type: "act", action: "ride_coaster", target: null }, all(me), NOW).twin.stamina).toBe(85);
+  });
+
+  it("a tired twin refuses tiring orders with the exact line and goes to rest instead", () => {
+    const tired = { ...me, stamina: 15 };
+    for (const cmd of [{ type: "act" as const, action: "swim", target: null }, { type: "go" as const, zone: "gym" }, { type: "act" as const, action: "watch_movie", target: "Sena" }]) {
+      const out = applyCommand(tired, cmd, all(tired), NOW, () => 50, () => 0.1);
+      expect(out.reply).toBe("I'm tired, let me rest first.");
+      expect(out.changed).toBe(true);
+      expect(out.target).toBeNull();
+      expect(out.twin.order).toMatchObject({ kind: "act", auto: true, zone: "maker_space" });
+      expect(out.twin.stamina).toBeGreaterThan(15);
+    }
+  });
+
+  it("an exhausted twin goes home to sleep", () => {
+    const out = applyCommand({ ...me, stamina: 5 }, { type: "act", action: "ride_bike", target: null }, all(me), NOW, () => 0, () => 0.9);
+    expect(out.reply).toBe("I'm tired, let me rest first.");
+    expect(out.twin.order).toMatchObject({ zone: "home", auto: true, action: { id: "sleep" } });
+    expect(out.twin.stamina).toBe(100);
+  });
+
+  it("restful orders always work, even when tired", () => {
+    const tired = { ...me, stamina: 10 };
+    const nap = applyCommand(tired, { type: "act", action: "sleep", target: null }, all(tired), NOW);
+    expect(nap.reply).toBeUndefined();
+    expect(nap.twin.order).toMatchObject({ zone: "home", action: { id: "sleep" } });
+    expect(nap.twin.order!.auto).toBeFalsy();
+    const lawn = applyCommand(tired, { type: "go", zone: "event_space" }, all(tired), NOW);
+    expect(lawn.reply).toBeUndefined();
+    expect(lawn.twin.stamina).toBe(20);
+    expect(applyCommand(tired, { type: "act", action: "hug", target: "Ravi" }, all(tired), NOW, () => 50).reply).toBeUndefined();
+  });
+
+  it("'take Sena to the cinema': both meet AT the cinema, not where Sena is", () => {
+    const out = applyCommand(me, { type: "act", action: "watch_movie", target: "Sena" }, all(me), NOW, () => 20);
+    expect(out.target?.id).toBe("sena");
+    expect(out.twin.locationZone).toBe("cinema");
+    expect(out.twin.order).toMatchObject({ zone: "cinema", targetName: "Sena", action: { id: "watch_movie", targetName: "Sena" } });
+  });
+
+  it("…and when Sena says no, the twin goes alone", () => {
+    const out = applyCommand(me, { type: "act", action: "watch_movie", target: "Sena" }, all(me), NOW, () => -60);
+    expect(out.twin.order).toMatchObject({ zone: "cinema", targetName: null });
+    expect(out.declinedBy?.id).toBe("sena");
   });
 });

@@ -138,6 +138,48 @@ describe("chatWithTwin actions", () => {
   });
 });
 
+describe("chatWithTwin: energy", () => {
+  // @ts-expect-error drizzle exposes raw client via session.client
+  const sql = () => tdb.db.session.client as { unsafe: (q: string) => Promise<Record<string, unknown>[]> };
+
+  it("a tired twin answers exactly \"I'm tired, let me rest first.\" and goes to rest by itself", async () => {
+    await sql().unsafe(`update twins set stamina = 12, owner_order = null where id = '${mineId}'`);
+    const out = await chatWithTwin(userId, "go swimming", toolBrain({
+      text: "Yes! Swimming now!", toolCalls: [{ name: "do_action", input: { action: "swim" } }]
+    }), tdb.db);
+    expect(out.reply).toBe("I'm tired, let me rest first.");
+    expect(out.worldChanged).toBe(true);
+    const t = await mine();
+    expect(t.order).toMatchObject({ kind: "act", auto: true });
+    expect(["maker_space", "network_hub"]).toContain(t.order!.zone);
+    expect(t.stamina).toBeGreaterThan(12);
+  });
+
+  it("an order spends energy when it starts", async () => {
+    await sql().unsafe(`update twins set stamina = 90, owner_order = null where id = '${mineId}'`);
+    await chatWithTwin(userId, "ride the rollercoaster", toolBrain({ text: "Wheee!", toolCalls: [] }), tdb.db);
+    expect(await mine()).toMatchObject({ stamina: 75, locationZone: "funfair", order: { kind: "act", zone: "funfair" } });
+  });
+
+  it("'take Ravi to the cinema': Ravi comes along when he likes the twin", async () => {
+    await sql().unsafe(`update twins set stamina = 90, owner_order = null; delete from relationships;
+      insert into relationships (from_twin_id, to_twin_id, score) values ('${raviId}', '${mineId}', 30)`);
+    const out = await chatWithTwin(userId, "take Ravi to the cinema", toolBrain({ text: "", toolCalls: [] }), tdb.db);
+    expect(out.order).toMatchObject({ zone: "cinema", targetName: "Ravi", action: { id: "watch_movie" } });
+    const ravi = (await new DrizzleTwinRepository(tdb.db).getById(raviId))!;
+    expect(ravi).toMatchObject({ locationZone: "cinema", stamina: 85, order: { auto: true, zone: "cinema", targetName: "Memo", action: { id: "watch_movie" } } });
+  });
+
+  it("…and goes alone when Ravi says no", async () => {
+    await sql().unsafe(`update twins set stamina = 90, owner_order = null; delete from relationships;
+      insert into relationships (from_twin_id, to_twin_id, score) values ('${raviId}', '${mineId}', -60)`);
+    const out = await chatWithTwin(userId, "take Ravi to the cinema", toolBrain({ text: "", toolCalls: [] }), tdb.db);
+    expect(out.order).toMatchObject({ zone: "cinema", targetName: null });
+    expect((await new DrizzleTwinRepository(tdb.db).getById(raviId))!.order).toBeNull();
+    expect(out.reply).toMatch(/Ravi/);
+  });
+});
+
 describe("chatWithTwin without an AI set up", () => {
   it("still follows simple orders", async () => {
     const out = await chatWithTwin(userId, "go to the lawn", null, tdb.db);

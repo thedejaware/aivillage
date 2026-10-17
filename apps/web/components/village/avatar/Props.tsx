@@ -1,30 +1,51 @@
 "use client";
 
 /**
- * Hand-held props (cup, phone, broom, watering can, apple, book) and small
- * effects (bubbles, water drops, sleep "z"). They are always mounted but
- * hidden; Avatar.tsx shows the one the current anim needs and orients it.
+ * Hand-held props (cup, phone, broom, watering can, apple, book), held items
+ * (juice glass, plate + fork, popcorn tub, basket, dumbbells), the avatar's
+ * own bike and small effects (bubbles, water drops, sleep "z"). They are
+ * always mounted but hidden; Avatar.tsx shows the one the current anim needs
+ * and orients it.
  */
 import * as THREE from "three";
-import type { PropId } from "./pose";
+import { BIKE, type PropId } from "./pose";
 import { geo, mat, merge, place, sphere, capsule, rbox, zzzMaterial } from "./assets";
 import { M } from "./Look";
 
+/** A prop can need more than one node (plate + fork, two dumbbells); the basket also has a spot on the ground. */
+export type PropNodeKey = PropId | "fork" | "dumbbellL" | "basketGround";
+const COMPANION: Partial<Record<PropNodeKey, PropNodeKey>> = { fork: "plate", dumbbellL: "dumbbell" };
+/** Is node `id` part of the shown prop? */
+export const nodeShown = (id: string, shown: PropNodeKey | null) =>
+  shown !== null && (id === shown || COMPANION[id as PropNodeKey] === shown);
+
 export interface PropNodes {
-  groups: Partial<Record<PropId, THREE.Object3D>>;
+  groups: Partial<Record<PropNodeKey, THREE.Object3D>>;
   /** inner nodes that Avatar re-orients each frame (upright in the avatar's frame) */
   cup: THREE.Group | null;
   phone: THREE.Group | null;
   can: THREE.Group | null;
   broom: THREE.Group | null;
+  juice: THREE.Group | null;
+  plate: THREE.Group | null;
+  fork: THREE.Group | null;
+  tub: THREE.Group | null;
+  basket: THREE.Group | null;
+  kernel: THREE.Object3D | null;
+  wheels: [THREE.Object3D | null, THREE.Object3D | null];
+  crank: THREE.Object3D | null;
   bubbles: THREE.Object3D[];
   drops: THREE.Object3D[];
   zs: THREE.Sprite[];
 }
 
-export const newPropNodes = (): PropNodes => ({ groups: {}, cup: null, phone: null, can: null, broom: null, bubbles: [], drops: [], zs: [] });
+export const newPropNodes = (): PropNodes => ({
+  groups: {}, cup: null, phone: null, can: null, broom: null,
+  juice: null, plate: null, fork: null, tub: null, basket: null, kernel: null, wheels: [null, null], crank: null,
+  bubbles: [], drops: [], zs: []
+});
 
-const reg = (n: PropNodes, id: PropId) => (o: THREE.Object3D | null) => {
+const reg = (n: PropNodes, id: PropNodeKey) => (o: THREE.Object3D | null) => {
   if (o) {
     n.groups[id] = o;
     o.visible = false;
@@ -69,7 +90,182 @@ export function HandProps({ n }: { n: PropNodes }) {
         <M g={geo("apple", () => sphere(0.032, 14, 10).scale(1, 0.92, 1))} m={mat("#e5484d", { rough: 0.45 })} />
         <M g={geo("leaf", () => merge([place(capsule(0.004, 0.015), [0, 0.035, 0]), place(sphere(0.012, 8, 6), [0.012, 0.04, 0], [0, 0, -0.8], [1.4, 0.5, 0.4])]))} m={mat("#3fa66b")} shadow={false} />
       </group>
+      <group ref={reg(n, "juice")}>
+        <group ref={(g) => { n.juice = g; }}>
+          {/* the hand grips the lower half; juice + straw show above the fingers */}
+          <M g={geo("juiceIn", () => new THREE.CylinderGeometry(0.031, 0.026, 0.1, 16))} m={mat("#ff9a1f", { rough: 0.35 })} position={[0.045, 0.035, 0.025]} />
+          <M g={geo("straw", () => place(new THREE.CylinderGeometry(0.0048, 0.0048, 0.14, 6), [0, 0, 0], [0, 0, 0.3]))} m={mat("#ff5d73", { rough: 0.5 })} position={[0.032, 0.115, 0.025]} shadow={false} />
+          <M g={geo("glass", () => new THREE.CylinderGeometry(0.036, 0.03, 0.13, 16))} m={mat("#e8f6ff", { rough: 0.08, opacity: 0.38 })} position={[0.045, 0.045, 0.025]} shadow={false} />
+        </group>
+      </group>
+      <group ref={reg(n, "fork")} position={[0.0, -0.035, 0.02]}>
+        <group ref={(g) => { n.fork = g; }}>
+          <M g={geo("fork", () => merge([
+            place(capsule(0.007, 0.09), [0, 0.01, 0]),
+            place(new THREE.BoxGeometry(0.028, 0.014, 0.006), [0, 0.068, 0]),
+            ...[-0.0105, 0, 0.0105].map((x) => place(new THREE.BoxGeometry(0.0045, 0.04, 0.0045), [x, 0.093, 0]))
+          ]))} m={mat("#cfd6de", { rough: 0.3, metal: 0.6 })} shadow={false} />
+        </group>
+      </group>
+      <group ref={reg(n, "dumbbell")} position={[0.0, -0.035, 0.0]}>
+        <M g={dumbbellGeo()} m={mat("#3d4350", { rough: 0.45, metal: 0.3 })} />
+      </group>
+      <mesh ref={(o) => { n.kernel = o; if (o) o.visible = false; }} geometry={geo("kernel", () => sphere(0.014, 8, 6).scale(1, 0.85, 1))}
+        material={mat("#fff3c4", { rough: 0.8 })} position={[0.0, -0.078, 0.02]} />
     </>
+  );
+}
+
+const dumbbellGeo = () => geo("dumbbell", () => merge([
+  place(new THREE.CylinderGeometry(0.0085, 0.0085, 0.13, 8), [0, 0, 0], [0, 0, Math.PI / 2]),
+  ...[-1, 1].map((sx) => place(new THREE.CylinderGeometry(0.031, 0.031, 0.024, 14), [sx * 0.052, 0, 0], [0, 0, Math.PI / 2]))
+]));
+
+/** Items held in the left hand: plate (eat), popcorn tub (watch), second dumbbell. */
+export function LeftHandProps({ n }: { n: PropNodes }) {
+  return (
+    <>
+      <group ref={reg(n, "plate")}>
+        <group ref={(g) => { n.plate = g; }}>
+          <group position={[-0.07, -0.04, 0.04]}>
+            <M g={geo("plate", () => new THREE.CylinderGeometry(0.078, 0.058, 0.013, 24))} m={mat("#ffffff", { rough: 0.35 })} />
+            <M g={geo("plateFood", () => merge([
+              place(sphere(0.034, 12, 8), [-0.012, 0.012, 0.0], [0, 0, 0], [1.2, 0.45, 1]),
+              place(sphere(0.022, 10, 8), [0.026, 0.014, -0.018], [0, 0, 0], [1, 0.7, 1])
+            ]))} m={mat("#f2b84b", { rough: 0.6 })} shadow={false} />
+            <M g={geo("plateGreens", () => merge([
+              place(sphere(0.016, 8, 6), [0.03, 0.016, 0.022]),
+              place(sphere(0.014, 8, 6), [0.045, 0.014, 0.0]),
+              place(sphere(0.012, 8, 6), [-0.035, 0.02, 0.03])
+            ]))} m={mat("#5cb85c", { rough: 0.7 })} shadow={false} />
+          </group>
+        </group>
+      </group>
+      <group ref={reg(n, "popcorn")}>
+        <group ref={(g) => { n.tub = g; }}>
+          <group position={[-0.07, 0.0, 0.01]}>
+            <M g={geo("tub", () => new THREE.CylinderGeometry(0.052, 0.038, 0.1, 18))} m={mat("#fbf7ee", { rough: 0.6 })} />
+            <M g={geo("tubStripes", () => merge([0, 1, 2, 3, 4, 5].map((i) => {
+              const g = new THREE.BoxGeometry(0.014, 0.1, 0.004);
+              g.rotateX(Math.atan2(0.014, 0.1));
+              g.translate(0, 0, 0.0465);
+              g.rotateY((i / 6) * Math.PI * 2);
+              return g;
+            })))} m={mat("#e5484d", { rough: 0.6 })} shadow={false} />
+            <M g={geo("popcornTop", () => merge(
+              [[0, 0.062, 0, 0.026], [0.026, 0.056, 0.012, 0.018], [-0.024, 0.056, 0.014, 0.018], [0.012, 0.056, -0.026, 0.018],
+                [-0.02, 0.055, -0.02, 0.017], [0.008, 0.074, 0.01, 0.016], [-0.01, 0.072, -0.006, 0.015]]
+                .map(([x, y, z, r]) => place(sphere(r, 8, 6), [x, y, z]))
+            ))} m={mat("#fff3c4", { rough: 0.85 })} shadow={false} />
+          </group>
+        </group>
+      </group>
+      <group ref={reg(n, "dumbbellL")} position={[0.0, -0.035, 0.0]}>
+        <M g={dumbbellGeo()} m={mat("#3d4350", { rough: 0.45, metal: 0.3 })} />
+      </group>
+    </>
+  );
+}
+
+/** Wicker basket with carrots and a lettuce; origin = top of the handle (it hangs below). */
+function Basket() {
+  return (
+    <>
+      <M g={geo("basket", () => merge([
+        place(new THREE.CylinderGeometry(0.075, 0.058, 0.075, 18), [0, -0.1125, 0]),
+        place(new THREE.TorusGeometry(0.075, 0.008, 6, 22), [0, -0.075, 0], [Math.PI / 2, 0, 0]),
+        place(new THREE.TorusGeometry(0.07, 0.005, 5, 22), [0, -0.1, 0], [Math.PI / 2, 0, 0]),
+        place(new THREE.TorusGeometry(0.065, 0.005, 5, 22), [0, -0.127, 0], [Math.PI / 2, 0, 0]),
+        place(new THREE.TorusGeometry(0.075, 0.0065, 6, 16, Math.PI), [0, -0.075, 0])
+      ]))} m={mat("#b5803f", { rough: 0.95 })} />
+      <M g={geo("carrots", () => merge([
+        place(new THREE.ConeGeometry(0.014, 0.08, 8), [-0.03, -0.07, 0.025], [Math.PI + 0.25, 0, 0.3]),
+        place(new THREE.ConeGeometry(0.013, 0.075, 8), [-0.045, -0.072, -0.012], [Math.PI - 0.2, 0, 0.35]),
+        place(new THREE.ConeGeometry(0.012, 0.07, 8), [0.01, -0.072, 0.035], [Math.PI + 0.35, 0, -0.1])
+      ]))} m={mat("#f08a24", { rough: 0.6 })} shadow={false} />
+      <M g={geo("basketGreens", () => merge([
+        place(sphere(0.04, 12, 8), [0.025, -0.07, -0.012], [0, 0, 0], [1, 0.75, 1]),
+        place(capsule(0.005, 0.025), [-0.038, -0.022, 0.034], [0.25, 0, 0.3]),
+        place(capsule(0.005, 0.025), [-0.056, -0.026, -0.018], [-0.2, 0, 0.35]),
+        place(capsule(0.005, 0.022), [0.004, -0.028, 0.046], [0.35, 0, -0.1])
+      ]))} m={mat("#6cc04a", { rough: 0.75 })} shadow={false} />
+    </>
+  );
+}
+
+/** Basket hanging on the left forearm (mounted in the left elbow group). */
+export function ForearmProps({ n }: { n: PropNodes }) {
+  return (
+    <group ref={reg(n, "basket")} position={[0, -0.05, 0]}>
+      <group ref={(g) => { n.basket = g; }}>
+        <Basket />
+      </group>
+    </group>
+  );
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+/** A tube between two points (bike frame). */
+function tube(a: [number, number, number], b: [number, number, number], r: number): THREE.BufferGeometry {
+  const va = new THREE.Vector3(...a);
+  const d = new THREE.Vector3(...b).sub(va);
+  const g = new THREE.CylinderGeometry(r, r, d.length(), 8);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, d.clone().normalize()));
+  g.translate(va.x + d.x / 2, va.y + d.y / 2, va.z + d.z / 2);
+  return g;
+}
+
+const B = BIKE;
+const BB: [number, number, number] = [0, B.crankY, B.crankZ];
+const REAR: [number, number, number] = [0, B.wheelR, B.rearZ];
+const SEAT: [number, number, number] = [0, 0.215, -0.02];
+const HEAD_T: [number, number, number] = [0, 0.4, 0.29];
+const HEAD_B: [number, number, number] = [0, 0.31, 0.31];
+const BAR: [number, number, number] = [0, 0.49, 0.285];
+
+/** The avatar's own small bicycle (root frame): frame, saddle + bar, two spinning wheels, the crank. */
+function Bike({ n }: { n: PropNodes }) {
+  const wheel = geo("bikeWheel", () => merge([
+    place(new THREE.TorusGeometry(B.wheelR - 0.012, 0.013, 8, 30), [0, 0, 0], [0, Math.PI / 2, 0]),
+    place(new THREE.CylinderGeometry(0.016, 0.016, 0.04, 10), [0, 0, 0], [0, 0, Math.PI / 2]),
+    ...[0, 1, 2].map((i) => place(new THREE.BoxGeometry(0.004, (B.wheelR - 0.02) * 2, 0.004), [0, 0, 0], [(i * Math.PI) / 3, 0, 0]))
+  ]));
+  return (
+    <group ref={reg(n, "bike")}>
+      <M g={geo("bikeFrame", () => merge([
+        tube(BB, [0, SEAT[1] + 0.005, SEAT[2]], 0.012),
+        tube([0, SEAT[1] - 0.01, SEAT[2]], HEAD_T, 0.011),
+        tube(BB, HEAD_B, 0.013),
+        tube(HEAD_B, HEAD_T, 0.014),
+        tube(HEAD_T, BAR, 0.009),
+        ...[-1, 1].flatMap((sx) => [
+          tube([sx * 0.012, BB[1], BB[2]], [sx * 0.026, REAR[1], REAR[2]], 0.008),
+          tube([sx * 0.008, SEAT[1] - 0.015, SEAT[2]], [sx * 0.026, REAR[1], REAR[2]], 0.007),
+          tube([sx * 0.008, HEAD_B[1], HEAD_B[2]], [sx * 0.026, B.wheelR, B.frontZ], 0.008)
+        ])
+      ]))} m={mat("#ef6a5a", { rough: 0.45, metal: 0.2 })} />
+      <M g={geo("bikeDark", () => merge([
+        place(rbox(0.07, 0.024, 0.11, 0.01), [0, SEAT[1] + 0.012, SEAT[2] - 0.005]),
+        place(new THREE.CylinderGeometry(0.009, 0.009, 0.38, 8), BAR, [0, 0, Math.PI / 2]),
+        ...[-1, 1].map((sx) => place(capsule(0.015, 0.05), [sx * 0.18, BAR[1], BAR[2]], [0, 0, Math.PI / 2]))
+      ]))} m={mat("#2c3038", { rough: 0.6 })} />
+      <group position={REAR} ref={(o) => { n.wheels[0] = o; }}>
+        <M g={wheel} m={mat("#3a3f48", { rough: 0.7 })} />
+      </group>
+      <group position={[0, B.wheelR, B.frontZ]} ref={(o) => { n.wheels[1] = o; }}>
+        <M g={wheel} m={mat("#3a3f48", { rough: 0.7 })} />
+      </group>
+      <group position={BB} ref={(o) => { n.crank = o; }}>
+        <M g={geo("bikeCrank", () => merge([
+          place(new THREE.CylinderGeometry(0.008, 0.008, 0.11, 8), [0, 0, 0], [0, 0, Math.PI / 2]),
+          place(new THREE.CylinderGeometry(0.036, 0.036, 0.006, 18), [-0.03, 0, 0], [0, 0, Math.PI / 2]),
+          place(new THREE.BoxGeometry(0.008, B.crankR, 0.012), [0.05, -B.crankR / 2, 0]),
+          place(new THREE.BoxGeometry(0.008, B.crankR, 0.012), [-0.05, B.crankR / 2, 0]),
+          place(new THREE.BoxGeometry(0.05, 0.012, 0.03), [0.078, -B.crankR, 0]),
+          place(new THREE.BoxGeometry(0.05, 0.012, 0.03), [-0.078, B.crankR, 0])
+        ]))} m={mat("#2c3038", { rough: 0.5, metal: 0.3 })} />
+      </group>
+    </group>
   );
 }
 
@@ -106,10 +302,15 @@ export function ChestProps({ n }: { n: PropNodes }) {
   );
 }
 
-/** Effects in the avatar's root frame (water drops, sleep z's). */
+/** Things in the avatar's root frame (bike, basket on the ground, water drops, sleep z's). */
 export function RootProps({ n }: { n: PropNodes }) {
   return (
     <>
+      <Bike n={n} />
+      {/* on the ground at the right side while digging (handle top 0.15 above the floor) */}
+      <group ref={reg(n, "basketGround")} position={[-0.3, 0.15, 0.14]} rotation={[0, 0.5, 0]}>
+        <Basket />
+      </group>
       <group>
         {[0, 1, 2].map((i) => (
           <mesh key={i} geometry={geo("drop", () => sphere(0.011, 8, 6).scale(1, 1.5, 1))} material={mat("#6ec3ff", { rough: 0.2, opacity: 0.85 })}

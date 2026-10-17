@@ -1,15 +1,20 @@
 /**
- * Village layout: the grid → world mapping, the road network, routing, and the
- * seats (activity spots) at each venue. Pure data + math — no three.js, so the
- * simulation can be tested and the scene and the sim always agree on positions.
+ * Village layout (Main Street map, LAYOUT_VERSION 2): the grid → world mapping,
+ * the road network, routing, every place's spots, the rollercoaster track and
+ * the bike route. Pure data + math — no three.js — so the simulation and the
+ * scene always agree on positions, and tests can drive them.
+ *
+ * One winding street runs from the house (west) to the rollercoaster (east);
+ * every place hangs off it on a short branch.
  */
 import { DEFAULT_ZONES } from "@aivillage/shared";
 
 export interface Pt { x: number; z: number; }
+export interface Pt3 { x: number; y: number; z: number; }
 
 // ---- grid mapping: tile (col,row) -> world (x,z). One tile = 1 unit. ----
-export const GRID_MIN = -2;
-export const GRID_MAX = 9;
+export const GRID_MIN = -8;
+export const GRID_MAX = 15;
 const CX = 3.5;
 const CZ = 3.5;
 export const gx = (col: number) => col - CX;
@@ -25,27 +30,38 @@ export function zoneCenter(zone: string): Pt {
 
 // ---------------- road network ----------------
 
-/** Waypoints: the four venues, the plaza, connector bends and a scenic ring. */
+const C = (zone: string) => zoneCenter(zone);
+
+/** Waypoints: every place's centre, the street spine S0…S7, and the coaster station. */
 export const NODES: Record<string, Pt> = {
-  C:     { x: -0.5, z: -0.5 }, // THE STAGE (plaza)
-  CAFE:  { x: -3.5, z: 1.5 },
-  QUIET: { x: 2.5,  z: -3.5 },
-  LAWN:  { x: 2.5,  z: 2.5 },
-  M1:    { x: -2.0, z: 0.6 },
-  M2:    { x: 0.9,  z: -2.0 },
-  M3:    { x: 0.9,  z: 1.4 },
-  R2:    { x: -0.8, z: 3.0 },
-  R3:    { x: 3.4,  z: -0.6 },
-  R4:    { x: -1.4, z: -3.0 }
+  STAGE: C("plaza"),
+  HOME: C("home"),
+  QUIET: C("network_hub"),
+  BIKES: C("bike_rack"),
+  CAFE: C("maker_space"),
+  GARDEN: C("garden"),
+  GYM: C("gym"),
+  LAWN: C("event_space"),
+  POOL: C("pool"),
+  CINEMA: C("cinema"),
+  FUN: { x: 8.2, z: 0.9 }, // the coaster station gate (the funfair centre is under the track)
+  S0: { x: -8.0, z: 0.2 },
+  S1: { x: -6.6, z: -1.4 },
+  S2: { x: -4.5, z: -0.5 },
+  S3: { x: -2.0, z: 1.5 },
+  S4: { x: 0.5, z: 0.5 },
+  S5: { x: 3.0, z: -1.0 },
+  S6: { x: 5.5, z: 0.5 },
+  S7: { x: 7.5, z: 1.0 }
 };
 
+/** The main street (spine) in order, west → east. */
+export const STREET: string[] = ["HOME", "S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "FUN"];
+
 export const EDGES: [string, string][] = [
-  ["C", "M1"], ["M1", "CAFE"],
-  ["C", "M2"], ["M2", "QUIET"],
-  ["C", "M3"], ["M3", "LAWN"],
-  ["CAFE", "R2"], ["R2", "LAWN"],
-  ["QUIET", "R3"], ["R3", "LAWN"],
-  ["CAFE", "R4"], ["R4", "QUIET"]
+  ...STREET.slice(1).map((id, i) => [STREET[i], id] as [string, string]),
+  ["QUIET", "S1"], ["BIKES", "S0"], ["CAFE", "S2"], ["GARDEN", "S3"], ["STAGE", "S4"],
+  ["GYM", "S5"], ["LAWN", "S6"], ["POOL", "S7"], ["CINEMA", "S7"]
 ];
 
 export const dist2 = (a: Pt, b: Pt) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
@@ -57,7 +73,7 @@ for (const [a, b] of EDGES) {
 }
 
 function nearestNode(p: Pt): string {
-  let best = "C";
+  let best = "STAGE";
   let bd = Infinity;
   for (const [id, n] of Object.entries(NODES)) {
     const d = dist2(p, n);
@@ -66,7 +82,7 @@ function nearestNode(p: Pt): string {
   return best;
 }
 
-/** Dijkstra over the tiny waypoint graph. */
+/** Dijkstra over the waypoint graph. */
 function nodePath(fromId: string, toId: string): string[] {
   if (fromId === toId) return [fromId];
   const distm: Record<string, number> = { [fromId]: 0 };
@@ -110,9 +126,11 @@ export function findRoute(from: Pt, to: Pt): Pt[] {
   return route;
 }
 
-// ---------------- venue layout + seats ----------------
+// ---------------- places: layout of each one (relative to its centre) ----------------
 
-export type ActivityKind = "coffee" | "bench" | "blanket" | "stage";
+export type ActivityKind =
+  | "coffee" | "bench" | "blanket" | "stage" | "bed" | "treadmill" | "weights"
+  | "swim" | "lounger" | "cinema" | "plot" | "coaster" | "bike";
 
 export interface SpotDef {
   id: string;
@@ -120,40 +138,141 @@ export interface SpotDef {
   kind: ActivityKind;
   x: number;
   z: number;
-  /** facing while doing the activity (radians, three.js Y rotation) */
+  /** facing while doing the activity (radians, three.js Y rotation; 0 = +z) */
   yaw: number;
 }
 
-/** Café tables, relative to THE CAFÉ's centre (kept off the three café roads). One seat per table. */
-export const CAFE_TABLES: Pt[] = [{ x: -0.9, z: 0.45 }, { x: 0.05, z: 1.1 }];
-/** Bench at QUIET CORNER (relative), south of the junction so no road runs through it; seats along it. */
+/** Café tables (relative to THE CAFÉ's centre); two seats per table, facing each other along x. */
+export const CAFE_TABLES: Pt[] = [{ x: -0.95, z: 0.45 }, { x: 0, z: 1.05 }, { x: 0.95, z: 0.45 }];
+export const CAFE_SEAT_OFFSET = 0.32;
+/** Bench at QUIET CORNER (relative), away from its road; two seats along it. */
 export const BENCH = { x: 0.1, z: -0.75, width: 0.85 };
 /** Picnic blanket at THE LAWN (relative). */
-export const BLANKET = { x: 0, z: 0, w: 0.85, d: 0.65 };
+export const BLANKET = { x: -0.18, z: 0.21, w: 0.85, d: 0.65 };
 /** Stage platform at THE STAGE (relative). */
 export const STAGE_PLATFORM = { x: 0, z: 0, radius: 1.05 };
+/** The shared house (relative): body footprint and the door, which faces the street. */
+export const HOUSE = { x: -0.25, z: -0.2, w: 1.5, d: 1.2, door: { x: 0.9, z: 0.42 } };
+/** Bike rack slots (relative), bikes point north to the street. */
+export const BIKE_SLOTS: Pt[] = [{ x: -0.6, z: 0.45 }, { x: -0.2, z: 0.45 }, { x: 0.2, z: 0.45 }, { x: 0.6, z: 0.45 }];
+/** Hobby garden plots (relative); the gardener stands 0.4 in front (−z) facing the plot. */
+export const GARDEN_PLOTS: Pt[] = [{ x: -0.75, z: 0.55 }, { x: 0, z: 0.85 }, { x: 0.75, z: 0.55 }];
+/** Gym stations (relative): a treadmill and two weight spots, facing the street (+z). */
+export const GYM_STATIONS: { kind: "treadmill" | "weights"; x: number; z: number }[] = [
+  { kind: "treadmill", x: -0.8, z: -0.35 },
+  { kind: "weights", x: 0.05, z: -0.75 },
+  { kind: "weights", x: 0.85, z: -0.35 }
+];
+/** Pool basin (relative): 4 lanes along z; swimmers go from `swimFrom` to `swimTo` and back. */
+export const POOL = {
+  x: 0, z: -0.95, w: 2.0, d: 1.5,
+  lanes: [-0.75, -0.25, 0.25, 0.75],
+  swimFrom: -0.35, swimTo: -1.55,
+  loungers: [{ x: -1.45, z: 0.35 }, { x: 1.45, z: 0.35 }] as Pt[]
+};
+/** Open-air cinema (relative): the screen faces the seats (−z); 2 rows of 4 seats face +z. */
+export const CINEMA = {
+  screen: { x: 0, z: 1.55, w: 2.2, h: 1.2 },
+  rows: [0.75, 0.25],
+  seatsX: [-0.9, -0.3, 0.3, 0.9]
+};
+
+const rel = (zone: string, p: Pt): Pt => {
+  const c = zoneCenter(zone);
+  return { x: c.x + p.x, z: c.z + p.z };
+};
 
 function buildSpots(): SpotDef[] {
   const out: SpotDef[] = [];
-  const at = (zone: string, rel: Pt) => {
-    const c = zoneCenter(zone);
-    return { x: c.x + rel.x, z: c.z + rel.z };
-  };
+  const add = (id: string, zone: string, kind: ActivityKind, p: Pt, yaw: number) => out.push({ id, zone, kind, ...rel(zone, p), yaw });
+
+  add("house-door", "home", "bed", HOUSE.door, Math.atan2(-HOUSE.door.x, -HOUSE.door.z));
+  add("bench-0", "network_hub", "bench", { x: BENCH.x - 0.22, z: BENCH.z + 0.06 }, 0);
+  add("bench-1", "network_hub", "bench", { x: BENCH.x + 0.23, z: BENCH.z + 0.06 }, 0);
+  BIKE_SLOTS.forEach((p, i) => add(`bike-${i}`, "bike_rack", "bike", p, Math.PI));
   CAFE_TABLES.forEach((t, i) => {
-    const p = at("maker_space", { x: t.x + 0.42, z: t.z + 0.3 });
-    out.push({ id: `cafe-${i}`, zone: "maker_space", kind: "coffee", ...p, yaw: Math.atan2(-0.42, -0.3) });
+    add(`cafe-${i}a`, "maker_space", "coffee", { x: t.x - CAFE_SEAT_OFFSET, z: t.z }, Math.PI / 2);
+    add(`cafe-${i}b`, "maker_space", "coffee", { x: t.x + CAFE_SEAT_OFFSET, z: t.z }, -Math.PI / 2);
   });
-  out.push({ id: "stage-0", zone: "plaza", kind: "stage", ...at("plaza", { x: 0, z: 0.25 }), yaw: Math.PI * 0.25 });
-  out.push({ id: "lawn-0", zone: "event_space", kind: "blanket", ...at("event_space", { x: -0.22, z: 0.14 }), yaw: Math.PI / 2 });
-  out.push({ id: "lawn-1", zone: "event_space", kind: "blanket", ...at("event_space", { x: 0.26, z: -0.12 }), yaw: -Math.PI / 2 });
-  out.push({ id: "bench-0", zone: "network_hub", kind: "bench", ...at("network_hub", { x: BENCH.x - 0.22, z: BENCH.z + 0.06 }), yaw: 0 });
-  out.push({ id: "bench-1", zone: "network_hub", kind: "bench", ...at("network_hub", { x: BENCH.x + 0.23, z: BENCH.z + 0.06 }), yaw: 0 });
+  GARDEN_PLOTS.forEach((p, i) => add(`plot-${i}`, "garden", "plot", { x: p.x, z: p.z - 0.4 }, 0));
+  add("stage-0", "plaza", "stage", { x: 0, z: -0.2 }, 0);
+  GYM_STATIONS.forEach((s, i) => add(`gym-${i}`, "gym", s.kind, s, 0));
+  POOL.lanes.forEach((x, i) => add(`lane-${i}`, "pool", "swim", { x, z: POOL.swimFrom }, Math.PI));
+  POOL.loungers.forEach((p, i) => add(`lounger-${i}`, "pool", "lounger", p, 0));
+  add("lawn-0", "event_space", "blanket", { x: BLANKET.x - 0.24, z: BLANKET.z + 0.13 }, Math.PI / 2);
+  add("lawn-1", "event_space", "blanket", { x: BLANKET.x + 0.24, z: BLANKET.z - 0.13 }, -Math.PI / 2);
+  add("lawn-2", "event_space", "blanket", { x: -0.7, z: -0.45 }, Math.PI * 0.25);
+  add("lawn-3", "event_space", "blanket", { x: 0.45, z: 0.75 }, -Math.PI * 0.75);
+  CINEMA.rows.forEach((z, r) => CINEMA.seatsX.forEach((x, i) => add(`cinema-${r}${i}`, "cinema", "cinema", { x, z }, 0)));
+  COASTER_QUEUE.forEach((p, i) => out.push({ id: `queue-${i}`, zone: "funfair", kind: "coaster", ...p, yaw: Math.PI / 2 }));
   return out;
 }
 
+// ---------------- rollercoaster ----------------
+
+/** Track oval (world): centre, radii; t = 0 is the station on the west side. */
+export const COASTER = { cx: 9.9, cz: 0.3, rx: 1.15, rz: 2.2, base: 0.35 };
+/** One ride, in seconds. */
+export const COASTER_RIDE_SECONDS = 40;
+/** The big drop, as track fractions [start, end] — riders throw their arms up here. */
+export const COASTER_DROP: [number, number] = [0.3, 0.42];
+/** Seats in the cart (cart-local: x = sideways, z = along the track). */
+export const COASTER_SEATS: Pt[] = [{ x: -0.12, z: 0.1 }, { x: 0.12, z: 0.1 }, { x: -0.12, z: -0.24 }, { x: 0.12, z: -0.24 }];
+/** Where riders wait for the cart (world). */
+export const COASTER_QUEUE: Pt[] = [{ x: 8.35, z: 0.3 }, { x: 8.35, z: -0.15 }, { x: 7.95, z: -0.15 }, { x: 7.95, z: -0.6 }];
+
+/** Track height keyframes (t, y): flat station, lift hill, big drop, a small bump, back home. */
+const HEIGHT_KEYS: [number, number][] = [
+  [0, 0.35], [0.08, 0.35], [0.3, 1.35], [0.42, 0.4], [0.55, 0.4], [0.65, 0.8], [0.78, 0.45], [0.92, 0.35], [1, 0.35]
+];
+
+function trackHeight(t: number): number {
+  const u = ((t % 1) + 1) % 1;
+  for (let i = 1; i < HEIGHT_KEYS.length; i++) {
+    const [t1, y1] = HEIGHT_KEYS[i];
+    const [t0, y0] = HEIGHT_KEYS[i - 1];
+    if (u <= t1) {
+      const k = (u - t0) / (t1 - t0);
+      return y0 + (y1 - y0) * (0.5 - 0.5 * Math.cos(Math.PI * k)); // eased
+    }
+  }
+  return HEIGHT_KEYS[0][1];
+}
+
+function trackPoint(t: number): Pt3 {
+  const th = 2 * Math.PI * t;
+  return { x: COASTER.cx - COASTER.rx * Math.cos(th), y: trackHeight(t), z: COASTER.cz + COASTER.rz * Math.sin(th) };
+}
+
+/** The cart's pose at track fraction t ∈ [0,1): position, heading (yaw) and slope (pitch, + = nose up). */
+export function coasterPose(t: number): { x: number; y: number; z: number; yaw: number; pitch: number } {
+  const p = trackPoint(t);
+  const q = trackPoint(t + 0.002);
+  const dx = q.x - p.x, dz = q.z - p.z, dy = q.y - p.y;
+  return { ...p, yaw: Math.atan2(dx, dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+}
+
+/** Sampled track centreline (world), for drawing rails and supports. */
+export const COASTER_TRACK: Pt3[] = Array.from({ length: 96 }, (_, i) => trackPoint(i / 96));
+
+// ---------------- bikes ----------------
+
+/** A bike ride: out of the rack, along the street to its east end and back to the rack. */
+export const BIKE_ROUTE: Pt[] = (() => {
+  const exit = rel("bike_rack", { x: 0, z: -0.6 });
+  const spine = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7"].map((id) => NODES[id]);
+  return [exit, ...spine, ...spine.slice(0, -1).reverse(), exit];
+})();
+
+// ---------------- spots ----------------
+
 export const SPOTS: SpotDef[] = buildSpots();
 
-/** The venue nearest to a tile (where a twin "is" for the HUD). */
+export function spotsFor(zone: string): SpotDef[] {
+  return SPOTS.filter((s) => s.zone === zone);
+}
+
+/** The place nearest to a tile (where a twin "is" for the HUD). */
 export function zoneOfTile(col: number, row: number): string {
   let best = DEFAULT_ZONES[0];
   let bd = Infinity;

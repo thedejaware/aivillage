@@ -144,7 +144,7 @@ describe("buildChatTools", () => {
   });
   it("go_to only accepts real venues", () => {
     const place = (byName.get("go_to")!.input_schema as unknown as { properties: { place: { enum: string[] } } }).properties.place;
-    expect(place.enum.sort()).toEqual(["event_space", "maker_space", "network_hub", "plaza"]);
+    expect(place.enum.sort()).toEqual(["bike_rack", "cinema", "event_space", "funfair", "garden", "gym", "home", "maker_space", "network_hub", "plaza", "pool"]);
   });
   it("talk_to only accepts real villagers", () => {
     const name = (byName.get("talk_to")!.input_schema as unknown as { properties: { name: { enum: string[] } } }).properties.name;
@@ -195,6 +195,15 @@ describe("do_action / talk_to message", () => {
     expect(tool.description).toContain("wash_hands");
     expect(tool.description).toContain("hug");
     expect(tool.input_schema.required).toEqual(["action"]);
+  });
+  it("do_action lists the Main Street activities and says a partner can be invited", () => {
+    const tool = buildChatTools(villagers).find((t) => t.name === "do_action")!;
+    for (const id of ["swim", "sunbathe", "work_out", "run", "ride_bike", "watch_movie", "ride_coaster", "garden", "drink_juice", "sleep"]) {
+      expect(tool.description).toContain(id);
+    }
+    expect(tool.description).toMatch(/take Sena to the cinema|invite/i);
+    const target = (tool.input_schema as unknown as { properties: { target: { description: string } } }).properties.target;
+    expect(target.description).toMatch(/invite|place/i);
   });
   it("maps do_action into an act command", () => {
     const out = parseToolTurn({ text: "Coming!", toolCalls: [{ name: "do_action", input: { action: "hug", target: "ravi" } }] }, villagers);
