@@ -6,10 +6,13 @@ export interface ConversePair {
   b: Twin;
   scoreAtoB: number; // current feelings A -> B
   scoreBtoA: number; // current feelings B -> A
+  /** A's owner asked A to pass this on to B ("tell Ravi dinner is ready") */
+  message?: string | null;
 }
 
 export function buildConversePrompt(p: ConversePair): string {
   const { a, b, scoreAtoB, scoreBtoA } = p;
+  const message = p.message?.trim();
   const labelAtoB = labelFor(scoreAtoB);
   const labelBtoA = labelFor(scoreBtoA);
   return [
@@ -20,6 +23,9 @@ export function buildConversePrompt(p: ConversePair): string {
     ``,
     `Current relationship: ${a.name} sees ${b.name} as a ${labelAtoB} (score ${scoreAtoB}). ${b.name} sees ${a.name} as a ${labelBtoA} (score ${scoreBtoA}).`,
     ``,
+    ...(message
+      ? [`${a.name}'s owner asked ${a.name} to pass on this message to ${b.name}: "${message}". ${a.name} delivers it in the first line, in their own words; ${b.name} reacts to it.`, ``]
+      : []),
     `Write a SHORT exchange of 2-4 lines, alternating between the two speakers. Then decide:`,
     `- deltaAtoB: integer in [-20,20] — how much ${a.name}'s feelings toward ${b.name} shift (most chats ±1..6; big only for conflict/bonding).`,
     `- deltaBtoA: integer in [-20,20] — how much ${b.name}'s feelings toward ${a.name} shift.`,

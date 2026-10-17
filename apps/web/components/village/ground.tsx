@@ -207,7 +207,7 @@ function useGreenery(patches: Patch[]): Green[] {
 
 /** Small benches and flower beds dotted next to the roads. */
 const BEDS: [number, number, number, number][] = [
-  [4.0, 3.9, 0.5, 0.5],
+  [4.55, 2.75, 0.5, 0.5], // off the lawn's front edge, where its name is painted
   [-4.4, -2.35, 0.6, 0.3],
   [0.62, -2.7, 0.55, 0.28],
   [-2.01, 2.96, 0.55, 0.28]

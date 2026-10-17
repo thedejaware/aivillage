@@ -30,9 +30,9 @@ The first start builds the app. This takes a few minutes. Later starts are fast.
 
 Follow the setup:
 
-1. **Choose your AI** — pick a provider and paste your key (see below).
-2. **Build your twin** — name, look, hair, clothes.
-3. Add more twins (for example your family), or fill the village with random villagers. Up to 10 twins can live in the village.
+1. **Choose your AI** — pick a provider, paste your key and pick a model (see below).
+2. **Build your twin** — your name and your look.
+3. **Add your people** — build more twins (for example your family), or press "Fill with random villagers". Up to 10 twins can live in the village.
 
 You can change all of this later on the **⚙️ Settings** page: switch the AI, add or edit twins, hide a twin, or delete it.
 
@@ -40,23 +40,75 @@ The village pauses when you close the app. When you open it again, every twin is
 
 ---
 
+## What you can do
+
+**Build twins that look like real people.** The avatar editor works like Bitmoji:
+
+- Choose a gender first. It gives a starting face, body and hairstyle.
+- Then change every part yourself:
+  - **Body:** skin tone, build, height.
+  - **Face:** face shape, expression, eyes and eye colour, eyebrows, eyelashes, nose, mouth, lip colour, blush, facial hair.
+  - **Hair:** style and colour.
+  - **Style:** clothes, clothes colour, glasses and accessories.
+- Clothes, hair and facial hair are open to everyone.
+
+**Talk to your twin.** Your main twin is you in the village. Chat with it at the bottom left. It remembers what you tell it, and it does what you ask, if it can:
+
+| You type | Your twin… |
+|---|---|
+| `go to the café` | walks to the café and sits down |
+| `talk to Sena` | walks to Sena and starts a conversation |
+| `tell Sena dinner is ready` | walks to Sena and passes the message on |
+| `jump`, `dance`, `wave`, `take a nap` | does it |
+| `wash your hands`, `drink coffee`, `read a book` | walks to the right place and does it |
+| `hug Sena`, `kiss Sena on the cheek`, `high five Omar` | walks to them and does it — **if they agree** |
+| `play the guitar` (anything else) | acts it out, if it is safe |
+| `stay here` / `do whatever you want` | stays put / goes back to its own life |
+
+**Rules.** Twins say no to things that are not OK:
+
+- No violence and nothing sexual.
+- Kisses are on the cheek only.
+- Twins can't fly, teleport or leave the island.
+- Touching (hug, cheek kiss) needs consent. A twin who doesn't like yours enough says no.
+
+**Watch the village live its life.** While the app is open, the AI picks what each villager does next: where to go, who to talk to, what to do. Twins become friends or rivals, and big moments show as captions. Before your twin makes a big dramatic move, it asks you first.
+
+**Main twin and villagers**
+
+- You can make several main twins, but only one is active at a time. Only the active one listens to you. Switch in Settings.
+- **Hide a twin** (deactivate) to take it out of the village. Everything about it is kept, and it comes back exactly as it was.
+- **Delete a twin** to remove it and everything about it, forever.
+
+---
+
 ## Choosing an AI
 
-AiVillage does not include an AI. You connect your own. You choose it on the **Settings** page.
+AiVillage does not include an AI. You connect your own, on the **Settings** page.
 
 | Provider | What it is | Get a key |
 |---|---|---|
-| **OpenRouter** | One key, many models from many companies | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| **Anthropic** | Claude models | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
-| **Google Gemini** | Gemini models | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| **OpenAI** | GPT models | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| **Ollama** | Free. Runs on your own computer. No key. | [ollama.com/download](https://ollama.com/download) |
+| **Anthropic** (recommended) | Claude models. Claude Haiku is fast and very cheap. | [platform.claude.com](https://platform.claude.com/settings/keys) |
+| **OpenRouter** | One key, models from many companies | [openrouter.ai](https://openrouter.ai/settings/keys) |
+| **Google Gemini** | Gemini models. Has a free tier. | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **OpenAI** | GPT models | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **Ollama** | Free. Runs on your own computer. No key. | [ollama.com](https://ollama.com/download) |
+
+**You need an API key, not a chat subscription.** A Claude Pro/Max or ChatGPT Plus plan does not work here: these companies don't allow other apps to use your subscription. Create an API key on the provider's developer site instead. You pay there with prepaid credit, separate from any subscription.
+
+**Pick a model.** After you choose a provider, the model list shows our suggestions (the cheapest good one is marked "recommended"). When you paste your key, the list also shows every chat model on your account. You can also type any model name.
 
 **Your key stays on your computer.** It is saved in the village database on your machine. It is never sent to us.
 
-**You pay your provider.** Every time a twin thinks or talks, the app makes one AI call on your account.
+**You pay your provider.** Every time a twin thinks or talks, the app makes an AI call on your account. The **chattiness** setting decides how often twins act. Settings shows an estimate for the model you picked. With Claude Haiku 5.5 it is roughly:
 
-**Cost tip:** cheap "lite" models are enough for villagers. For example Claude Haiku, Gemini Flash-Lite or GPT mini models. Set a spending limit in your provider's dashboard.
+| Chattiness | AI calls per hour | Cost per hour (Claude Haiku 5.5) |
+|---|---|---|
+| Calm | about 45 | about $0.01 |
+| Normal | about 180 | about $0.05 |
+| Busy | about 360 | about $0.11 |
+
+These are estimates, for while the village is open. Nothing runs when the app is closed. Set a spending limit in your provider's dashboard to be safe.
 
 ### Using Ollama (free, local)
 
@@ -69,17 +121,17 @@ AiVillage does not include an AI. You connect your own. You choose it on the **S
 
 3. In Settings, choose **Ollama** and the model `llama3.2`.
 
-The app reaches Ollama on your computer at `http://host.docker.internal:11434`. A local model needs a reasonably fast computer. Replies can be slower than a cloud AI.
+The app reaches Ollama on your computer at `http://host.docker.internal:11434`. A local model uses a lot of your computer's memory (several GB) and makes it work hard. Replies can be slower than a cloud AI.
 
 ### Setting the AI with environment variables (optional)
 
 If you prefer, you can set an Anthropic key when you start the app:
 
 ```bash
-LLM_PROVIDER=anthropic LLM_MODEL=claude-haiku-4-5 ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+LLM_PROVIDER=anthropic LLM_MODEL=claude-haiku-5-5 ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
-You can also put these lines in a file named `.env` next to `docker-compose.yaml`. Most players do not need this. Use the Settings page.
+You can also put these lines in a file named `.env` next to `docker-compose.yaml`. This key is used only until you save an AI on the Settings page. Most players do not need this. Use the Settings page.
 
 ---
 
@@ -126,6 +178,11 @@ Works out of the box. All images run natively on ARM.
 **Start completely fresh**
 `docker compose down -v` deletes the village database. The next `docker compose up -d` starts an empty village.
 
+**"Could not connect" when testing the AI**
+- Check the key: copy it again, without spaces.
+- Check that your provider account has credit.
+- If you typed a model name, check its spelling, or pick one from the list.
+
 ---
 
 ## For developers
@@ -134,9 +191,9 @@ AiVillage is a pnpm workspace:
 
 | Folder | What |
 |---|---|
-| `packages/shared` | Shared TypeScript types and logic (used as source, no build step) |
-| `apps/backend` | Node + Express + Socket.IO on :4000, Postgres with drizzle-orm |
-| `apps/web` | Next.js 14 (app router) on :3000 |
+| `packages/shared` | Shared TypeScript types and logic: looks, actions and rules, orders, world state, cost estimate (used as source, no build step) |
+| `apps/backend` | Node + Express + Socket.IO on :4000, Postgres with drizzle-orm. AI providers in `src/agent/providers/`, the village (twins, settings) in `src/village/`, the world clock and AI beats in `src/sim/` |
+| `apps/web` | Next.js 14 (app router) on :3000. The 3D village uses React Three Fiber (`components/village/`); avatars are built in code (`components/village/avatar/`); Settings and setup are in `app/settings`, `app/setup` and `components/settings/` |
 
 You need Node 20+ and pnpm 9 (`corepack enable`).
 
@@ -154,7 +211,7 @@ Later, start it again with `docker start aivillage-pg`.
 
 ```bash
 pnpm install
-cp apps/backend/.env.example apps/backend/.env   # then edit it
+cp apps/backend/.env.example apps/backend/.env   # then edit it (the AI key there is optional)
 pnpm --filter @aivillage/backend db:push          # apply the schema
 ```
 
@@ -183,5 +240,9 @@ export TESTCONTAINERS_RYUK_DISABLED="true"
 **Docker images**
 
 `docker-compose.yaml` builds `apps/backend/Dockerfile` and `apps/web/Dockerfile` from the repo root. On every start, the backend applies the schema with `drizzle-kit push --force` and then starts the server.
+
+**Model list and prices**
+
+The suggested models and their prices are in `apps/backend/src/agent/providers/types.ts`. They were checked on 2026-10-17. Providers change models and prices often, so check them again from time to time.
 
 Product plan: [`docs/product/2026-10-17-aivillage-v4-local-village-plan.md`](docs/product/2026-10-17-aivillage-v4-local-village-plan.md).

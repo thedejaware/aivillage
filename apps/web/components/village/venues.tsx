@@ -4,10 +4,12 @@
  * The four drama venues, built around the layout's prop anchors so the seats
  * twins use (SPOTS) line up with a chair, the bench, the blanket and the stage.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
-import { ZONE_DISPLAY, ZONE_TAGLINE } from "@aivillage/shared";
+import { ZONE_DISPLAY } from "@aivillage/shared";
+import { groundLabelPlacement } from "../../lib/village/venueLabels";
 import { BENCH, BLANKET, CAFE_TABLES, SPOTS, STAGE_PLATFORM, zoneCenter, type Pt } from "../../lib/village/layout";
 import { P, ZONE_ACCENT, beam, cachedGeo, decal, flatSlab, glow, roundedRectShape, solid } from "./materials";
 import { Ball, Box, Cyl, FlowerBed, LampPost, ParkBench, RBox, StaticBatch, Tree, type V3 } from "./parts";
@@ -333,32 +335,107 @@ function VenueLights({ night }: { night: number }) {
 // ---------------- signs ----------------
 
 const pillStyle: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 7, padding: "5px 11px 5px 9px", borderRadius: 999,
+  display: "flex", alignItems: "center", gap: 7, padding: "2px 8px", borderRadius: 999,
   background: "rgba(255,255,255,0.96)", boxShadow: "0 4px 12px rgba(20,40,80,0.12)",
   fontFamily: "var(--font-ui), Inter, system-ui, sans-serif", whiteSpace: "nowrap", userSelect: "none"
 };
 
-/** Floating white pill naming a venue; `more` shows "+N more built" for overflow structures. */
+/** World height of the painted letters. */
+const NAME_HEIGHT = 0.42;
+const CANVAS_H = 160;
+
+/** The page's UI font (next/font gives Inter a generated family name). */
+function uiFont(): string {
+  const v = typeof document !== "undefined" ? getComputedStyle(document.body).getPropertyValue("--font-ui").trim() : "";
+  return v ? `${v}, Inter, system-ui, sans-serif` : "Inter, system-ui, sans-serif";
+}
+
+/** Paint `text` into a canvas: bold capitals in the venue colour with a white edge, like road paint. */
+function paintName(canvas: HTMLCanvasElement, text: string, color: string): number {
+  const ctx = canvas.getContext("2d")!;
+  const font = `800 ${CANVAS_H * 0.62}px ${uiFont()}`;
+  ctx.font = font;
+  (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = "6px";
+  const pad = 28;
+  const w = Math.ceil(ctx.measureText(text).width) + pad * 2;
+  canvas.width = w;
+  canvas.height = CANVAS_H;
+  ctx.font = font; // resizing resets the context
+  (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = "6px";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 16;
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  ctx.strokeText(text, w / 2, CANVAS_H / 2 + 4);
+  ctx.fillStyle = color;
+  ctx.fillText(text, w / 2, CANVAS_H / 2 + 4);
+  return w / CANVAS_H;
+}
+
+/**
+ * A venue's name painted flat on the ground at the edge nearest the camera,
+ * turned to read upright (a map label, not a floating badge — it never covers
+ * a twin's name). `more` shows "+N more built" for overflow structures.
+ */
 function VenueSign({ zone, more }: { zone: string; more: number }) {
   const c = zoneCenter(zone);
   const r = PAD_RADIUS[zone] ?? 1.2;
   const accent = ZONE_ACCENT[zone] ?? P.accent;
+  const group = useRef<THREE.Group>(null);
+  const plane = useRef<THREE.Mesh>(null);
+  const { texture, material } = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture, transparent: true, depthWrite: false, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+    });
+    return { texture, material };
+  }, []);
+
+  useEffect(() => {
+    const draw = () => {
+      const aspect = paintName(texture.image as HTMLCanvasElement, (ZONE_DISPLAY[zone] ?? zone).toUpperCase(), shade(accent, -0.18));
+      texture.needsUpdate = true;
+      plane.current?.scale.set(NAME_HEIGHT * aspect, NAME_HEIGHT, 1);
+    };
+    draw();
+    void document.fonts?.ready.then(draw); // repaint once the UI font has loaded
+    return () => { texture.dispose(); material.dispose(); };
+  }, [texture, material, zone, accent]);
+
+  useFrame(({ camera }) => {
+    const g = group.current;
+    if (!g) return;
+    const p = groundLabelPlacement(c, r, { x: camera.position.x, z: camera.position.z });
+    g.position.set(p.x, GRASS_TOP + 0.006, p.z);
+    g.rotation.y = p.yaw;
+  });
+
   return (
-    <Html position={[c.x, 0.3, c.z + r + 0.3]} center zIndexRange={[10, 0]} pointerEvents="none" style={{ pointerEvents: "none" }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-        <div style={pillStyle}>
-          <span style={{ width: 8, height: 8, borderRadius: 999, background: accent, boxShadow: `0 0 0 3px ${accent}26`, flex: "none" }} />
-          <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: P.text, letterSpacing: 0.4 }}>{ZONE_DISPLAY[zone] ?? zone}</span>
-            <span style={{ fontSize: 9, color: P.muted }}>{ZONE_TAGLINE[zone] ?? ""}</span>
-          </span>
-        </div>
-        {more > 0 && (
-          <div style={{ ...pillStyle, padding: "2px 8px", fontSize: 9, fontWeight: 600, color: P.muted }}>+{more} more built</div>
-        )}
-      </div>
-    </Html>
+    <group ref={group}>
+      <mesh ref={plane} rotation={[-Math.PI / 2, 0, 0]} material={material} renderOrder={1}>
+        <planeGeometry args={[1, 1]} />
+      </mesh>
+      {more > 0 && (
+        <Html position={[0, 0.05, 0.32]} center zIndexRange={[10, 0]} pointerEvents="none" style={{ pointerEvents: "none" }}>
+          <div style={{ ...pillStyle, fontSize: 9, fontWeight: 600, color: P.muted }}>+{more} more built</div>
+        </Html>
+      )}
+    </group>
   );
+}
+
+/** Darken/lighten a hex colour (HSL lightness). */
+function shade(hex: string, amount: number): string {
+  const col = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  col.getHSL(hsl);
+  col.setHSL(hsl.h, Math.min(1, hsl.s + 0.1), Math.max(0, Math.min(1, hsl.l + amount)));
+  return `#${col.getHexString()}`;
 }
 
 // ---------------- all venues ----------------

@@ -33,7 +33,9 @@ export async function talkOnArrival(actorId: string, targetId: string, llm: LlmC
         a: actor,
         b: target,
         scoreAtoB: (await relRepo.get(actor.id, target.id))?.score ?? 0,
-        scoreBtoA: (await relRepo.get(target.id, actor.id))?.score ?? 0
+        scoreBtoA: (await relRepo.get(target.id, actor.id))?.score ?? 0,
+        // "tell Ravi dinner is ready": the message is the point of the visit
+        message: actor.order?.kind === "talk_to" ? actor.order.message ?? null : null
       },
       llm
     );

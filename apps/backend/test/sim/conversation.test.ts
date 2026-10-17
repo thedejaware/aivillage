@@ -157,3 +157,14 @@ describe("converse", () => {
     expect(result.moment).toBeNull();
   });
 });
+
+describe("buildConversePrompt: passing on a message", () => {
+  it("makes the first speaker deliver the owner's message", () => {
+    const p = buildConversePrompt({ a: twinA, b: twinB, scoreAtoB: 0, scoreBtoA: 0, message: "dinner is ready" });
+    expect(p).toContain("dinner is ready");
+    expect(p).toMatch(/Lena .*pass(es)? on|deliver/i);
+  });
+  it("says nothing about a message when there is none", () => {
+    expect(buildConversePrompt({ a: twinA, b: twinB, scoreAtoB: 0, scoreBtoA: 0 })).not.toMatch(/deliver|pass on/i);
+  });
+});

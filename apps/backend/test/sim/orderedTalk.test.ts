@@ -4,6 +4,7 @@ import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { talkOnArrival } from "../../src/sim/orderedTalk.js";
 import { DrizzleRelationshipRepository } from "../../src/db/relationshipRepository.js";
 import { DrizzleMemoryRepository } from "../../src/db/memoryRepository.js";
+import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
 
 let tdb: TestDb;
 let memoId: string;
@@ -62,5 +63,23 @@ describe("talkOnArrival", () => {
   it("returns no frames when the brain fails, instead of throwing", async () => {
     const frames = await talkOnArrival(memoId, raviId, new CannedLlmClient(["not json"]), tdb.db);
     expect(frames).toEqual([]);
+  });
+});
+
+describe("talkOnArrival: 'tell Ravi …'", () => {
+  it("passes the owner's message into the conversation", async () => {
+    const repo = new DrizzleTwinRepository(tdb.db);
+    const memo = (await repo.getById(memoId))!;
+    const now = Date.now();
+    await repo.save({
+      ...memo,
+      order: {
+        kind: "talk_to", zone: "event_space", targetName: "Ravi", label: "Going to tell Ravi something",
+        issuedAt: new Date(now).toISOString(), holdUntil: new Date(now + 60_000).toISOString(), message: "dinner is ready"
+      }
+    });
+    const prompts: string[] = [];
+    await talkOnArrival(memoId, raviId, { generate: async (p: string) => { prompts.push(p); return convo; } }, tdb.db);
+    expect(prompts[0]).toContain("dinner is ready");
   });
 });
