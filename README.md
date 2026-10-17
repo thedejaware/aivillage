@@ -4,6 +4,10 @@ Your own private village of AI twins, running on your computer.
 
 You build twins that look like you and your family. You talk to your main twin and give it orders. The twins live, talk and act on their own. They are powered by **your** AI model.
 
+
+https://github.com/user-attachments/assets/612e0353-8ec7-450a-97ba-004bb3fcab7f
+
+
 ---
 
 ## Quick start
