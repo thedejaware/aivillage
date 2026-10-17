@@ -5,7 +5,7 @@
  * lighting with a day/night cycle, the twins (driven by VillageSim) and the
  * camera. Clicking a twin selects it; "focus" glides the camera to it.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { MapControls } from "@react-three/drei";
@@ -16,6 +16,7 @@ import { VillageSim } from "../../lib/village/sim";
 import { ISLAND_HALF } from "../../lib/village/layout";
 import { daynessAt } from "../../lib/village/clock";
 import { targetFps } from "../../lib/village/frameBudget";
+import { guardControls } from "../../lib/village/controlsGuard";
 import { VillageWorld, VillageLighting } from "./World";
 import { TwinAvatar } from "./Twins";
 
@@ -109,8 +110,16 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
     c.update();
   }, [camera]);
 
-  // keep the look-at point over the island: shift camera + target together
-  const clampTarget = () => {
+  // un-stick the controls if a mouse-up gets lost (e.g. released in another app)
+  useEffect(() => {
+    const c = controls.current;
+    return c ? guardControls(c) : undefined;
+  }, []);
+
+  // keep the look-at point over the island: shift camera + target together.
+  // Both callbacks must stay the same function: drei re-connects the controls
+  // when they change, and a re-connect mid-drag used to freeze drag and zoom.
+  const clampTarget = useCallback(() => {
     const c = controls.current;
     if (!c) return;
     const t = c.target;
@@ -121,7 +130,8 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
     const delta = new THREE.Vector3(cx - t.x, cy - t.y, cz - t.z);
     t.add(delta);
     camera.position.add(delta);
-  };
+  }, [camera]);
+  const stopGlide = useCallback(() => { glide.current = null; }, []);
 
   return (
     <MapControls
@@ -135,7 +145,7 @@ function CameraRig({ api }: { api: React.MutableRefObject<CameraApi | null> }) {
       minDistance={MIN_DIST}
       maxDistance={MAX_DIST}
       onChange={clampTarget}
-      onStart={() => { glide.current = null; }}
+      onStart={stopGlide}
     />
   );
 }
