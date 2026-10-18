@@ -134,6 +134,22 @@ AiVillage does not include an AI. You connect your own, on the **Settings** page
 
 These are estimates, for while the village is open. Nothing runs when the app is closed. The village also pauses by itself when its tab is hidden for a minute, or when nobody touches it for 10 minutes; click to continue. Set a spending limit in your provider's dashboard to be safe.
 
+### Where the AI is used
+
+Every AI call goes to the model you chose, on your key. These are all of them:
+
+| When | What the AI does | How often |
+|---|---|---|
+| You chat with your twin | Writes your twin's reply, and notes new facts about you to remember | 1 call per message you send |
+| The village lives | Twins talk to each other and decide on big moves | Set by chattiness; only while the village is open |
+| A twin finishes its to-do list | Plans the twin's next 3 activities | 1 call per 3 activities; only while the village is open |
+| You send your twin to talk to someone | Writes that conversation when your twin arrives | 1 call per order |
+| You approve a big move | Plays out that move | 1 call |
+| Settings → random villagers | Invents new twins (name, personality) | 1 call per click |
+| Settings → test connection | A tiny check that your key works | 1 call per test |
+
+**Chat cost stays flat.** Each chat message sends only a fixed amount of context: the last 12 chat messages, a few recent village memories, and what your twin knows about you. A long chat does not make later messages more expensive. With Claude Haiku 5.5 one message costs about $0.0003.
+
 ### Using Ollama (free, local)
 
 1. Install Ollama from [ollama.com](https://ollama.com/download).
