@@ -129,7 +129,9 @@ describe("scatter", () => {
   it("covers the whole bigger island", () => {
     const pts = scatter(3, 1.0, 0.3);
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      expect(pts.some((p) => p.x * sx > 6 && p.z * sz > 6), `${sx},${sz}`).toBe(true);
+      // each corner is wooded — or a place fills it (the big pool sits in the north-east)
+      const filled = pts.some((p) => p.x * sx > 6 && p.z * sz > 6) || PADS.some((p) => p.x * sx > 6 && p.z * sz > 6);
+      expect(filled, `${sx},${sz}`).toBe(true);
     }
   });
 

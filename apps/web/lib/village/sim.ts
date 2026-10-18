@@ -19,7 +19,7 @@ import {
   type ActionItem, type BodyAnim, type PerformedAction, type TwinPose, type WorldState, type WorldTwinView
 } from "@aivillage/shared";
 import {
-  findRoute, tileToWorld, zoneCenter, SPOTS, ISLAND_HALF, NODES, EDGES, POOL, BIKE_ROUTE,
+  findRoute, tileToWorld, zoneCenter, SPOTS, ISLAND_HALF, NODES, EDGES, POOL, BIKE_ROUTE, COASTER_EXITS,
   COASTER_DROP, COASTER_QUEUE, COASTER_RIDE_SECONDS, COASTER_SEATS, coasterPose,
   type Pt, type SpotDef, type ActivityKind
 } from "./layout";
@@ -893,9 +893,9 @@ export class VillageSim {
   }
 
   private unloadRider(tw: SimTwin, i: number, now: number): void {
-    const gate = NODES.FUN;
-    tw.x = gate.x - 0.35 + i * 0.25;
-    tw.z = gate.z + 0.45;
+    const exit = COASTER_EXITS[i % COASTER_EXITS.length];
+    tw.x = exit.x;
+    tw.z = exit.z;
     tw.yaw = 0;
     this.finishTask(tw, now, false);
     tw.bubble = "🤩";

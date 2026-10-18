@@ -4,7 +4,7 @@
  * nobody watches.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { actHoldMs, findAction, type Chattiness, type LlmClient, type OwnerOrder } from "@aivillage/shared";
+import { PLACES, actHoldMs, findAction, type Chattiness, type LlmClient, type OwnerOrder } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { startNextStepLoop } from "../../src/sim/nextStepLoop.js";
 import { claimTwins, releaseTwins } from "../../src/sim/twinLocks.js";
@@ -28,6 +28,8 @@ beforeEach(async () => {
 });
 
 const T0 = new Date("2026-10-17T12:00:00Z");
+/** how many twins fit in the gym (the tests follow the layout, not a fixed number) */
+const gymRoom = PLACES.find((p) => p.zone === "gym")!.capacity;
 
 async function addTwin(name: string, opts: { stamina?: number; zone?: string; order?: OwnerOrder | null; main?: boolean; createdSec?: number } = {}): Promise<string> {
   let owner = "null";
@@ -187,7 +189,7 @@ describe("startNextStepLoop", () => {
   });
 
   it("two twins in one tick can't overfill a place", async () => {
-    for (let i = 0; i < 2; i++) await addTwin(`Lifter${i}`, { order: order("gym", true) });
+    for (let i = 0; i < gymRoom - 1; i++) await addTwin(`Lifter${i}`, { order: order("gym", true) });
     const a = await addTwin("A", { createdSec: 1 });
     const b = await addTwin("B", { createdSec: 2 });
     const l = loop({ llm: fakeLlm({}, step("gym", "work_out")) });
@@ -306,7 +308,7 @@ describe("to-do list mode: one AI call plans several activities", () => {
     await l.tick();
     after(clock, actHoldMs(findAction("swim")!));
     const busy = { ...order("gym", true), holdUntil: new Date(clock.now.getTime() + 600_000).toISOString() };
-    for (let i = 0; i < 3; i++) await addTwin(`Lifter${i}`, { order: busy, createdSec: 10 + i });
+    for (let i = 0; i < gymRoom; i++) await addTwin(`Lifter${i}`, { order: busy, createdSec: 10 + i });
     await l.tick();
     l.stop();
     expect((await twin(id)).order!.zone).toBe("cinema");

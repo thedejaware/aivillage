@@ -66,7 +66,7 @@ export function houseDoorWorld(): Pt {
  * terrace as the default (+x,+z) camera sees it, so it never hides the tables,
  * and beside the path that comes in from the road.
  */
-export const CAFE_BUILDING = { x: -0.85, z: -0.85, w: 1.1, d: 0.68 };
+export const CAFE_BUILDING = { x: -1.3, z: -0.85, w: 1.41, d: 0.87 };
 
 /** The pool deck (relative to the pool centre): holds the basin and the loungers. */
 export const POOL_DECK = (() => {

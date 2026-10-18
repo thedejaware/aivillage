@@ -25,7 +25,7 @@ describe("places", () => {
 
   it("capacities follow the design", () => {
     const cap = (z: string) => placeOf(z)!.capacity;
-    expect([cap("maker_space"), cap("gym"), cap("pool"), cap("cinema"), cap("funfair"), cap("bike_rack"), cap("garden"), cap("network_hub")]).toEqual([6, 3, 6, 8, 4, 4, 3, 2]);
+    expect([cap("maker_space"), cap("gym"), cap("pool"), cap("cinema"), cap("funfair"), cap("bike_rack"), cap("garden"), cap("network_hub")]).toEqual([8, 5, 12, 10, 4, 4, 3, 2]);
   });
 
   it("busy places block conversations; restful places don't", () => {

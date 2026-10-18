@@ -2,7 +2,8 @@
 
 /**
  * The pool: a tiled deck with the basin cut into the island (4 lanes along z,
- * 3 lane ropes), a ladder, two sun loungers at POOL.loungers with parasols,
+ * 3 lane ropes), a ladder, a row of eight sun loungers at POOL.loungers on the
+ * road side (a parasol in each gap between neighbours, none on the x = 0 path),
  * and a water surface a little below the deck whose shimmer moves only while
  * the pool is on screen.
  */
@@ -99,7 +100,12 @@ export function PoolStatic() {
   const liner = solid(LINER, 0.4);
   const coping = solid(P.white, 0.6);
   const ropeLen = POOL.d - 0.12;
-  const floats = 12;
+  const floats = Math.round(ropeLen / 0.115); // ~one float every 0.115
+  // parasols sit in the gap between neighbouring loungers on the same side of the path
+  const parasols = POOL.loungers.slice(1)
+    .map((l, i) => ({ a: POOL.loungers[i], b: l }))
+    .filter(({ a, b }) => Math.sign(a.x - POOL.x) === Math.sign(b.x - POOL.x))
+    .map(({ a, b }) => ({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 - 0.05 }));
   return (
     <group position={[c.x, 0, c.z]}>
       <mesh geometry={deck} material={solid("#eef6fb", 0.9)} receiveShadow />
@@ -128,22 +134,23 @@ export function PoolStatic() {
             />
           ));
         })}
-        <Ladder x={hw - 0.04} z={-0.3} />
+        {/* ladder on the +x wall near the lounger end, outside the outer lane */}
+        <Ladder x={hw - 0.04} z={hd - 0.5} />
         {/* lane numbers painted at the near end */}
         {POOL.lanes.map((x, i) => (
           <Box key={`n${x}`} size={[0.05 + i * 0.012, 0.004, 0.05]} p={[x, PAD_TOP + 0.022, hd + 0.0]} m={solid(ZONE_ACCENT.pool, 0.7)} cast={false} />
         ))}
       </group>
-      {POOL.loungers.map((l, i) => (
-        <group key={i}>
-          <Lounger x={l.x} z={l.z} />
-          <Parasol x={l.x + Math.sign(l.x) * 0.3} z={l.z - 0.05} h={1.0} r={0.34} a={P.white} b={ZONE_ACCENT.pool} />
-        </group>
+      {POOL.loungers.map((l, i) => <Lounger key={i} x={l.x} z={l.z} />)}
+      {parasols.map((p, i) => (
+        <Parasol key={`p${i}`} x={p.x} z={p.z} h={1.0} r={0.3} a={P.white} b={ZONE_ACCENT.pool} />
       ))}
-      <Lifebuoy x={-1.6} z={-1.75} />
-      <PottedPlant x={1.6} z={-1.72} />
-      <PottedPlant x={-1.62} z={1.45} s={0.9} />
-      <PottedPlant x={1.62} z={1.45} s={0.9} />
+      {/* side strips beside the basin and the front corners past the loungers; all inside the pad */}
+      <Lifebuoy x={-2.3} z={-1.5} />
+      <PottedPlant x={-2.4} z={-2.6} />
+      <PottedPlant x={2.4} z={-2.6} />
+      <PottedPlant x={-2.85} z={0.2} s={0.9} />
+      <PottedPlant x={2.85} z={0.2} s={0.9} />
     </group>
   );
 }
@@ -185,7 +192,7 @@ export function PoolWater() {
   const { geo, mat, tex } = useMemo(() => {
     const tex = new THREE.CanvasTexture(causticCanvas());
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1.7, 1.3);
+    tex.repeat.set(POOL.w * 0.85, POOL.d * 0.85); // same caustic size at any basin size
     tex.colorSpace = THREE.SRGBColorSpace;
     const mat = new THREE.MeshStandardMaterial({
       color: "#56c4ef", map: tex, transparent: true, opacity: 0.84, roughness: 0.12, metalness: 0,

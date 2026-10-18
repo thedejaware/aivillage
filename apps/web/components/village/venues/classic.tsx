@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The four original drama venues — café (upgraded: building + 3 tables × 2
+ * The four original drama venues — café (upgraded: building + 4 tables × 2
  * chairs + kiosk), stage, lawn and quiet corner — at their Main Street spots.
  * Every chair, the bench and the blanket sit exactly on the layout's SPOTS.
  */
@@ -16,8 +16,11 @@ import { Parasol, StringLights, VenuePad, circleShape, local } from "./common";
 
 // ---------------- THE CAFÉ ----------------
 
-/** Gable-roofed café facing +z: shop window, serving hatch under a striped awning, door, lantern. */
-function CafeHouse({ p, w, d }: { p: V3; w: number; d: number }) {
+/**
+ * Gable-roofed café facing +z: shop window, serving hatch under a striped awning, door, lantern.
+ * w/d are the unscaled footprint; the whole house is drawn `s` times bigger.
+ */
+function CafeHouse({ p, w, d, s = 1 }: { p: V3; w: number; d: number; s?: number }) {
   const h = 0.8;
   const roofH = 0.42;
   const slope = Math.atan2(roofH, d / 2 + 0.08);
@@ -39,7 +42,7 @@ function CafeHouse({ p, w, d }: { p: V3; w: number; d: number }) {
   const win = glow(P.lampGlow, 0.5, 2.2);
   const fz = d / 2;
   return (
-    <group position={p}>
+    <group position={p} scale={s}>
       <RBox size={[w + 0.06, 0.08, d + 0.06]} radius={0.025} p={[0, 0.04, 0]} m={solid("#f1e3d3")} />
       <RBox size={[w, h, d]} radius={0.05} p={[0, h / 2, 0]} m={wall} />
       <mesh geometry={gable} position={[0, h - 0.01, 0]} material={wall} castShadow receiveShadow />
@@ -159,7 +162,10 @@ function MenuBoard({ x, z, yaw }: { x: number; z: number; yaw: number }) {
   );
 }
 
-const CAFE_POLES: Pt[] = [{ x: -1.32, z: 0.98 }, { x: 1.32, z: 0.98 }];
+/** The house is drawn this much bigger than its base model; CAFE_BUILDING holds the scaled footprint. */
+const CAFE_SCALE = 1.28;
+/** Light poles just past the two front tables, so the strings hang over all four. */
+const CAFE_POLES: Pt[] = [{ x: -1.5, z: 1.35 }, { x: 1.5, z: 1.35 }];
 
 export function Cafe() {
   const zone = "maker_space";
@@ -169,12 +175,13 @@ export function Cafe() {
   return (
     <group position={[c.x, 0, c.z]}>
       <VenuePad zone={zone} color="#fbf1e6" />
-      <CafeHouse p={[B.x, PAD_TOP, B.z]} w={B.w} d={B.d} />
+      <CafeHouse p={[B.x, PAD_TOP, B.z]} w={B.w / CAFE_SCALE} d={B.d / CAFE_SCALE} s={CAFE_SCALE} />
       {CAFE_TABLES.map((t, i) => <CafeTable key={i} x={t.x} z={t.z} />)}
       {chairs.map((ch) => <CafeChair key={ch.id} x={ch.x} z={ch.z} yaw={ch.yaw} />)}
-      <Kiosk x={0.95} z={-0.75} />
-      <MenuBoard x={0.38} z={-1.05} yaw={0.5} />
-      <FlowerBed x={1.3} z={-0.2} w={0.32} d={0.32} seed={11} rot={-0.5} />
+      {/* kiosk, menu board and flowers on the right of the walk-in path; the house is on the left */}
+      <Kiosk x={1.2} z={-0.85} />
+      <MenuBoard x={0.65} z={-1.6} yaw={0.4} />
+      <FlowerBed x={1.75} z={-0.25} w={0.4} d={0.36} seed={11} rot={-0.5} />
       {CAFE_POLES.map((p, i) => (
         <group key={i} position={[p.x, PAD_TOP, p.z]}>
           <Cyl rad={0.02} h={1.3} p={[0, 0.65, 0]} m={solid(P.deepBlue, 0.55)} low />

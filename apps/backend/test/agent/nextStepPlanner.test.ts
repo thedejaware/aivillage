@@ -5,6 +5,9 @@ import {
   type NextStepContext
 } from "../../src/agent/nextStepPlanner.js";
 
+/** room at a place (the tests follow the layout, not fixed numbers) */
+const cap = (zone: string) => PLACES.find((p) => p.zone === zone)!.capacity;
+
 const NOW = new Date("2026-10-17T12:00:00Z");
 
 const mk = (id: string, extra: Partial<Twin> = {}): Twin => ({
@@ -45,8 +48,8 @@ describe("placeOptions (free room per place)", () => {
     const expired = mk("old", { order: { ...busyAt("cinema"), holdUntil: "2026-10-17T11:00:00Z" } });
     const opts = placeOptions([...riders, expired, mk("me", { order: busyAt("gym") })], "me", NOW);
     expect(opts.some((p) => p.zone === "funfair")).toBe(false);
-    expect(opts.find((p) => p.zone === "cinema")!.free).toBe(8);
-    expect(opts.find((p) => p.zone === "gym")!.free).toBe(3);
+    expect(opts.find((p) => p.zone === "cinema")!.free).toBe(cap("cinema"));
+    expect(opts.find((p) => p.zone === "gym")!.free).toBe(cap("gym"));
   });
 
   it("lists every place's activities with their energy effect", () => {
@@ -130,7 +133,7 @@ describe("parseNextStep", () => {
   });
 
   it("drops the partner when only one spot is left", () => {
-    const lifters = [1, 2].map((i) => mk(`g${i}`, { order: busyAt("gym") }));
+    const lifters = Array.from({ length: cap("gym") - 1 }, (_, i) => mk(`g${i}`, { order: busyAt("gym") }));
     expect(parseNextStep('{"zone":"gym","action":"work_out","partner":"Sena","narrative":"x"}', ctxFor(80, lifters))).toMatchObject({ zone: "gym", partner: null });
   });
 
@@ -171,7 +174,7 @@ describe("ruleNextStep (no AI)", () => {
 
   it("never picks a full place", () => {
     const crowd = [
-      ...[1, 2, 3, 4, 5, 6].map((i) => mk(`c${i}`, { order: busyAt("maker_space") })),
+      ...Array.from({ length: cap("maker_space") }, (_, i) => mk(`c${i}`, { order: busyAt("maker_space") })),
       ...[1, 2].map((i) => mk(`q${i}`, { order: busyAt("network_hub") }))
     ];
     const step = ruleNextStep(me, ctxFor(15, crowd), () => 0.1);

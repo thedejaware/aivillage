@@ -47,20 +47,20 @@ export interface WorldState {
 
 /**
  * Canonical zone layout shared by the backend (state building) and the renderer.
- * Main Street map (LAYOUT_VERSION 2): world = tile − 3.5; one winding street
+ * Main Street map (LAYOUT_VERSION 3: bigger places, moved out from the street): world = tile − 3.5; one winding street
  * from the house (west) to the rollercoaster (east). The first entry is the fallback zone.
  */
 export const DEFAULT_ZONES: WorldZone[] = [
   { name: "plaza", col: 4, row: 1 },
   { name: "home", col: -6, row: 3 },
   { name: "network_hub", col: -4, row: -2 },
-  { name: "bike_rack", col: -5, row: 6 },
-  { name: "maker_space", col: -1, row: 6 },
-  { name: "garden", col: 2, row: 8 },
-  { name: "gym", col: 7, row: -2 },
+  { name: "bike_rack", col: -5, row: 8 },
+  { name: "maker_space", col: -1, row: 9 },
+  { name: "garden", col: 4, row: 11 },
+  { name: "gym", col: 5, row: -4 },
   { name: "event_space", col: 7, row: 8 },
-  { name: "pool", col: 11, row: 0 },
-  { name: "cinema", col: 11, row: 9 },
+  { name: "pool", col: 11, row: -5 },
+  { name: "cinema", col: 11, row: 12 },
   { name: "funfair", col: 13, row: 4 }
 ];
 

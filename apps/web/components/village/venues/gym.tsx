@@ -1,20 +1,39 @@
 "use client";
 
 /**
- * The open-air gym: a rubber floor under a slatted pergola (you see inside
- * from any angle) with a glass back wall; a treadmill at the treadmill station,
- * mats + dumbbell racks at the weight stations, a weight bench and a squat rack.
+ * The open-air gym: a D-shaped rubber floor (fills the pad, flat side to the
+ * street) and a slatted pergola with a glass back wall over the middle (you see
+ * inside from any angle). Treadmills at the 2 treadmill stations, mats + dumbbell
+ * racks at the 3 weight stations; the outer ones (left treadmill, right weights)
+ * sit in the open. Extras: a weight bench, a squat rack, a water cooler, towels
+ * and two planters — all kept ≥ 0.4 from every station and off the walk-in paths.
  */
+import * as THREE from "three";
 import { GYM_STATIONS, zoneCenter } from "../../../lib/village/layout";
-import { P, ZONE_ACCENT, glass, glow, roundedRectShape, flatSlab, solid } from "../materials";
-import { Box, Cyl, RBox } from "../parts";
+import { P, ZONE_ACCENT, glass, glow, flatSlab, solid } from "../materials";
+import { Ball, Box, Cyl, RBox } from "../parts";
 import { PAD_TOP, SEAT_Y } from "../scenery";
 import { VenuePad } from "./common";
 
-const FLOOR = { x: 0, z: -0.5, w: 2.3, d: 1.5 };
+/** Rubber floor: a disc of radius r (inside the 2.0 pad) cut straight at z = front (the road side). */
+const FLOOR = { r: 1.9, front: 0.62 };
+/** Pergola posts (relative). A full-width roof can't fit the round pad, so it covers the middle;
+ *  the back wall sits just behind the middle weight station's rack (z −1.49). */
+const ROOF = { x0: -0.92, x1: 0.9, z0: -1.54, z1: 0.45 };
 const ROOF_Y = 1.5;
 const FRAME = "#2a3550";
 const RUBBER = "#5b6b84";
+
+/** Disc with its front (+z) cut off; shape y = world −z (flatSlab lays it flat). */
+function floorShape(r: number, front: number): THREE.Shape {
+  const xf = Math.sqrt(r * r - front * front);
+  const a = -Math.asin(front / r);
+  const s = new THREE.Shape();
+  s.moveTo(-xf, -front);
+  s.lineTo(xf, -front);
+  s.absarc(0, 0, r, a, Math.PI - a, false);
+  return s;
+}
 
 /** Treadmill centred on the station; belt top at SEAT_Y.treadmill, console in front (+z). */
 function Treadmill({ x, z }: { x: number; z: number }) {
@@ -92,11 +111,21 @@ function SquatRack({ x, z }: { x: number; z: number }) {
   );
 }
 
+/** Planter box with a round shrub. */
+function Planter({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[x, PAD_TOP, z]}>
+      <RBox size={[0.18, 0.16, 0.18]} radius={0.02} p={[0, 0.08, 0]} m={solid(FRAME, 0.6)} />
+      <Ball rad={0.13} p={[0, 0.26, 0]} m={solid(P.foliage, 0.9, true)} low />
+      <Ball rad={0.08} p={[0.05, 0.36, -0.03]} m={solid(P.foliageDark, 0.9, true)} low />
+    </group>
+  );
+}
+
 /** Slatted pergola roof on four posts + a glass back wall. */
 function Pergola() {
   const frame = solid(FRAME, 0.5);
-  const x0 = FLOOR.x - FLOOR.w / 2 + 0.06, x1 = FLOOR.x + FLOOR.w / 2 - 0.06;
-  const z0 = FLOOR.z - FLOOR.d / 2 + 0.06, z1 = FLOOR.z + FLOOR.d / 2 - 0.06;
+  const { x0, x1, z0, z1 } = ROOF;
   const w = x1 - x0, d = z1 - z0;
   const slats: number[] = [];
   for (let x = x0 + 0.12; x < x1 - 0.05; x += 0.2) slats.push(x);
@@ -124,11 +153,11 @@ function Pergola() {
 export function Gym() {
   const zone = "gym";
   const c = zoneCenter(zone);
-  const floor = flatSlab(`gym-floor:${FLOOR.w}:${FLOOR.d}`, roundedRectShape(FLOOR.w, FLOOR.d, 0.12), 0.006);
+  const floor = flatSlab(`gym-floor:${FLOOR.r}:${FLOOR.front}`, floorShape(FLOOR.r, FLOOR.front), 0.006);
   return (
     <group position={[c.x, 0, c.z]}>
       <VenuePad zone={zone} color="#eef1f6" />
-      <mesh geometry={floor} position={[FLOOR.x, PAD_TOP, FLOOR.z]} material={solid(RUBBER, 0.95)} receiveShadow />
+      <mesh geometry={floor} position={[0, PAD_TOP, 0]} material={solid(RUBBER, 0.95)} receiveShadow />
       <Pergola />
       {GYM_STATIONS.map((s, i) =>
         s.kind === "treadmill" ? (
@@ -140,16 +169,19 @@ export function Gym() {
           </group>
         )
       )}
-      <WeightBench x={-0.4} z={-0.9} rot={0} />
-      <SquatRack x={0.55} z={-1.0} />
-      {/* water cooler + towel stack */}
-      <group position={[1.0, PAD_TOP, -1.0]}>
+      {/* front-left, beside the walk-in road: bench along x (bar at its left end), squat rack facing the street */}
+      <WeightBench x={-0.55} z={0.27} rot={Math.PI / 2} />
+      <SquatRack x={-1.4} z={0.35} />
+      {/* water cooler + towel stack by the glass wall, planters in the free corners */}
+      <group position={[-0.15, PAD_TOP, -1.38]}>
         <RBox size={[0.14, 0.3, 0.14]} radius={0.02} p={[0, 0.15, 0]} m={solid(P.white, 0.6)} />
         <Cyl rad={0.06} h={0.14} p={[0, 0.37, 0]} m={glass("#6fd0f5", 0.7)} cast={false} />
       </group>
-      <group position={[-0.92, PAD_TOP, -1.02]}>
+      <group position={[0.74, PAD_TOP, -1.34]}>
         {[0, 1, 2].map((i) => <RBox key={i} size={[0.18, 0.035, 0.12]} radius={0.012} p={[0, 0.02 + i * 0.036, 0]} m={solid(i % 2 ? P.white : "#9fd6ff", 0.9)} />)}
       </group>
+      <Planter x={-1.15} z={-1.2} />
+      <Planter x={1.62} z={-0.38} />
     </group>
   );
 }

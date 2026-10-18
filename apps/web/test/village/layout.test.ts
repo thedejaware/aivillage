@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DEFAULT_ZONES, PLACES, placeOf } from "@aivillage/shared";
 import {
   findRoute, NODES, EDGES, SPOTS, zoneCenter, tileToWorld, zoneOfTile, ISLAND_HALF, GRID_MIN, GRID_MAX,
-  COASTER_TRACK, coasterPose, COASTER_QUEUE, BIKE_ROUTE, spotsFor, type Pt
+  COASTER_TRACK, coasterPose, COASTER_QUEUE, COASTER_EXITS, BIKE_ROUTE, spotsFor, type Pt
 } from "../../lib/village/layout";
 import { PAD_RADIUS, SEAT_Y } from "../../components/village/scenery";
 import { WALK_SPEED } from "../../lib/village/sim";
@@ -63,6 +63,13 @@ describe("the Main Street map", () => {
     }
   });
 
+  it("the big places are bigger (Main Street v3)", () => {
+    expect(PAD_RADIUS.pool).toBeGreaterThanOrEqual(2.9);
+    expect(PAD_RADIUS.gym).toBeGreaterThanOrEqual(1.9);
+    expect(PAD_RADIUS.cinema).toBeGreaterThanOrEqual(2.2);
+    expect(PAD_RADIUS.maker_space).toBeGreaterThanOrEqual(2.1);
+  });
+
   it("zoneOfTile returns the nearest place", () => {
     for (const z of DEFAULT_ZONES) expect(zoneOfTile(z.col, z.row)).toBe(z.name);
   });
@@ -91,10 +98,33 @@ describe("spots", () => {
     }
   });
 
-  it("the café has 3 tables with 2 seats facing each other", () => {
+  it("the café has 4 tables with 2 seats facing each other", () => {
     const seats = spotsFor("maker_space");
     expect(seats.every((s) => s.kind === "coffee")).toBe(true);
-    expect(seats).toHaveLength(6);
+    expect(seats).toHaveLength(8);
+  });
+
+  it("the pool has 4 lanes and 8 sun loungers", () => {
+    const kinds = spotsFor("pool").map((s) => s.kind);
+    expect(kinds.filter((k) => k === "swim")).toHaveLength(4);
+    expect(kinds.filter((k) => k === "lounger")).toHaveLength(8);
+  });
+
+  it("the gym has 2 treadmills and 3 weight spots", () => {
+    const kinds = spotsFor("gym").map((s) => s.kind);
+    expect(kinds.filter((k) => k === "treadmill")).toHaveLength(2);
+    expect(kinds.filter((k) => k === "weights")).toHaveLength(3);
+  });
+
+  it("the cinema seats 10", () => {
+    expect(spotsFor("cinema")).toHaveLength(10);
+  });
+
+  it("no two spots are closer than a twin's width", () => {
+    for (const a of SPOTS) for (const b of SPOTS) {
+      if (a.id >= b.id) continue;
+      expect(Math.hypot(a.x - b.x, a.z - b.z), `${a.id}/${b.id}`).toBeGreaterThan(0.3);
+    }
   });
 
   it("place spot kinds", () => {
@@ -129,8 +159,24 @@ describe("rollercoaster", () => {
     expect(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)).toBeLessThan(0.05);
   });
 
+  it("the track is bigger than the first one (rx 1.15, rz 2.2)", () => {
+    const xs = COASTER_TRACK.map((p) => p.x), zs = COASTER_TRACK.map((p) => p.z);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(2.7);
+    expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(5.8);
+  });
+
   it("the track stays on the island", () => {
     for (const p of COASTER_TRACK) expect(Math.max(Math.abs(p.x), Math.abs(p.z))).toBeLessThan(ISLAND_HALF - 0.6);
+  });
+
+  it("riders get off beside the gate, clear of the rails and of each other", () => {
+    expect(COASTER_EXITS).toHaveLength(4);
+    for (const e of COASTER_EXITS) {
+      const rail = Math.min(...COASTER_TRACK.map((p) => Math.hypot(p.x - e.x, p.z - e.z)));
+      expect(rail).toBeGreaterThan(0.45);
+      expect(Math.hypot(e.x - NODES.FUN.x, e.z - NODES.FUN.z)).toBeLessThan(1);
+    }
+    for (const a of COASTER_EXITS) for (const b of COASTER_EXITS) if (a !== b) expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThan(0.25);
   });
 
   it("riders queue next to the station", () => {

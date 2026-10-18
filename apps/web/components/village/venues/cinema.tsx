@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * The open-air cinema: a big screen at CINEMA.screen facing two rows of four
+ * The open-air cinema: a big screen at CINEMA.screen facing two rows of five
  * seats (seat tops at SEAT_Y.cinema), string lights, a projector post with a
  * faint beam, and a popcorn cart. The screen shows simple moving abstract
- * colours and shapes (no films): a 256×144 canvas redrawn ~10 times a second,
- * only while the screen is on screen and the tab is visible.
+ * colours and shapes (no films): a 300×160 canvas (same aspect as the 3.0×1.6
+ * screen) redrawn ~10 times a second, only while the screen is on screen and
+ * the tab is visible.
  */
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -20,6 +21,8 @@ import { onScreen } from "./visibility";
 const SCREEN_BOTTOM = 0.55;
 const FRAME = "#24304a";
 const SEAT_RED = "#e0457b";
+/** Height of the light-string poles; the strings hang just below the top. */
+const POLE_H = 1.5;
 
 /** Folding cinema seat facing +z; cushion top at SEAT_Y.cinema. */
 function CinemaSeat({ x, z }: { x: number; z: number }) {
@@ -105,7 +108,8 @@ export function CinemaStatic() {
   const seats = SPOTS.filter((s) => s.zone === zone && s.kind === "cinema").map((s) => ({ ...local(zone, s), id: s.id }));
   const midY = SCREEN_BOTTOM + S.h / 2;
   const target = useMemo(() => new THREE.Vector3(c.x + S.x, midY, c.z + S.z - 0.04), [c.x, c.z, S.x, S.z, midY]);
-  const backPoles: Pt[] = [{ x: -1.3, z: -0.2 }, { x: 1.3, z: -0.2 }];
+  // fixed props (local): outside the seat block, clear of the road (x = 0, −z), inside the pad
+  const backPoles: Pt[] = [{ x: -1.75, z: -0.3 }, { x: 1.75, z: -0.3 }];
   const top = SCREEN_BOTTOM + S.h + 0.05;
   return (
     <group>
@@ -122,9 +126,9 @@ export function CinemaStatic() {
             </group>
           ))}
           <Box size={[S.w + 0.14, 0.05, 0.02]} p={[0, SCREEN_BOTTOM - 0.12, -0.03]} m={solid(ZONE_ACCENT.cinema, 0.6)} cast={false} />
-          {/* bulbs along the frame top */}
-          {Array.from({ length: 9 }, (_, i) => (
-            <Ball key={i} rad={0.025} p={[-S.w / 2 + (i * S.w) / 8, top - PAD_TOP + 0.03, -0.035]} m={glow(P.lampGlow, 0.6, 2.6)} cast={false} low />
+          {/* bulbs along the frame top (~0.27 apart, whatever the width) */}
+          {Array.from({ length: 12 }, (_, i) => (
+            <Ball key={i} rad={0.025} p={[-S.w / 2 + (i * S.w) / 11, top - PAD_TOP + 0.03, -0.035]} m={glow(P.lampGlow, 0.6, 2.6)} cast={false} low />
           ))}
         </group>
         {seats.map((s) => <CinemaSeat key={s.id} x={s.x} z={s.z} />)}
@@ -132,26 +136,26 @@ export function CinemaStatic() {
         {CINEMA.rows.map((rz) => (
           <Box key={rz} size={[CINEMA.seatsX[CINEMA.seatsX.length - 1] - CINEMA.seatsX[0] + 0.4, 0.01, 0.3]} p={[0, PAD_TOP + 0.005, rz]} m={solid("#e6dcf5", 0.9)} cast={false} />
         ))}
-        <PopcornCart x={-1.2} z={-0.85} rot={0.7} />
+        <PopcornCart x={-1.5} z={-1.1} rot={0.7} />
         {backPoles.map((p, i) => (
           <group key={i} position={[p.x, PAD_TOP, p.z]}>
-            <Cyl rad={0.02} h={1.35} p={[0, 0.675, 0]} m={frame} low />
-            <Ball rad={0.028} p={[0, 1.36, 0]} m={frame} cast={false} low />
+            <Cyl rad={0.02} h={POLE_H} p={[0, POLE_H / 2, 0]} m={frame} low />
+            <Ball rad={0.028} p={[0, POLE_H + 0.01, 0]} m={frame} cast={false} low />
           </group>
         ))}
-        <StringLights a={backPoles[0]} b={{ x: S.x - S.w / 2 - 0.02, z: S.z }} h={PAD_TOP + 1.33} n={9} sag={0.18} />
-        <StringLights a={backPoles[1]} b={{ x: S.x + S.w / 2 + 0.02, z: S.z }} h={PAD_TOP + 1.33} n={9} sag={0.18} />
-        <StringLights a={backPoles[0]} b={backPoles[1]} h={PAD_TOP + 1.33} n={10} sag={0.15} />
+        <StringLights a={backPoles[0]} b={{ x: S.x - S.w / 2 - 0.02, z: S.z }} h={PAD_TOP + POLE_H - 0.02} n={11} sag={0.2} />
+        <StringLights a={backPoles[1]} b={{ x: S.x + S.w / 2 + 0.02, z: S.z }} h={PAD_TOP + POLE_H - 0.02} n={11} sag={0.2} />
+        <StringLights a={backPoles[0]} b={backPoles[1]} h={PAD_TOP + POLE_H - 0.02} n={13} sag={0.17} />
       </group>
-      <Projector at={{ x: c.x + 0.6, z: c.z - 0.45 }} target={target} />
+      <Projector at={{ x: c.x + 0.95, z: c.z - 0.6 }} target={target} />
     </group>
   );
 }
 
 // ---------------- the picture ----------------
 
-const W = 256;
-const H = 144;
+const W = 300; // 300×160 matches the 3.0×1.6 screen, so shapes are not stretched
+const H = 160;
 const HUES = Array.from({ length: 72 }, (_, i) => `hsl(${i * 5}, 72%, 62%)`);
 const DEEP = Array.from({ length: 72 }, (_, i) => `hsl(${i * 5}, 55%, 22%)`);
 const hueAt = (deg: number) => ((Math.round(deg / 5) % 72) + 72) % 72;
@@ -171,7 +175,7 @@ function paintScreen(ctx: CanvasRenderingContext2D, t: number): void {
     const y = H * (0.5 + 0.35 * Math.cos(t * (0.17 + i * 0.05) + i));
     ctx.fillStyle = HUES[hueAt(base + i * 120)];
     ctx.beginPath();
-    ctx.arc(x, y, 48 + 14 * Math.sin(t * 0.6 + i), 0, Math.PI * 2);
+    ctx.arc(x, y, 54 + 15 * Math.sin(t * 0.6 + i), 0, Math.PI * 2);
     ctx.fill();
   }
   // crisp shapes: squares, triangles and rings that spin and drift
@@ -179,7 +183,7 @@ function paintScreen(ctx: CanvasRenderingContext2D, t: number): void {
   for (let i = 0; i < 5; i++) {
     const x = W * (0.5 + 0.42 * Math.sin(t * (0.33 + i * 0.09) + i * 1.3));
     const y = H * (0.5 + 0.4 * Math.sin(t * (0.27 + i * 0.11) + i * 2.4));
-    const s = 10 + 6 * Math.sin(t * 0.9 + i * 1.7);
+    const s = 11 + 7 * Math.sin(t * 0.9 + i * 1.7);
     const a = t * (0.6 + i * 0.2);
     ctx.fillStyle = HUES[hueAt(base * 1.5 + i * 72 + 40)];
     ctx.strokeStyle = ctx.fillStyle;

@@ -143,7 +143,7 @@ export interface SpotDef {
 }
 
 /** Café tables (relative to THE CAFÉ's centre); two seats per table, facing each other along x. */
-export const CAFE_TABLES: Pt[] = [{ x: -0.95, z: 0.45 }, { x: 0, z: 1.05 }, { x: 0.95, z: 0.45 }];
+export const CAFE_TABLES: Pt[] = [{ x: -1.4, z: 0.45 }, { x: -0.5, z: 1.25 }, { x: 0.5, z: 1.25 }, { x: 1.4, z: 0.45 }];
 export const CAFE_SEAT_OFFSET = 0.32;
 /** Bench at QUIET CORNER (relative), away from its road; two seats along it. */
 export const BENCH = { x: 0.1, z: -0.75, width: 0.85 };
@@ -157,24 +157,27 @@ export const HOUSE = { x: -0.25, z: -0.2, w: 1.5, d: 1.2, door: { x: 0.9, z: 0.4
 export const BIKE_SLOTS: Pt[] = [{ x: -0.6, z: 0.45 }, { x: -0.2, z: 0.45 }, { x: 0.2, z: 0.45 }, { x: 0.6, z: 0.45 }];
 /** Hobby garden plots (relative); the gardener stands 0.4 in front (−z) facing the plot. */
 export const GARDEN_PLOTS: Pt[] = [{ x: -0.75, z: 0.55 }, { x: 0, z: 0.85 }, { x: 0.75, z: 0.55 }];
-/** Gym stations (relative): a treadmill and two weight spots, facing the street (+z). */
+/** Gym stations (relative): two treadmills and three weight spots, facing the street (+z). */
 export const GYM_STATIONS: { kind: "treadmill" | "weights"; x: number; z: number }[] = [
-  { kind: "treadmill", x: -0.8, z: -0.35 },
-  { kind: "weights", x: 0.05, z: -0.75 },
-  { kind: "weights", x: 0.85, z: -0.35 }
+  { kind: "treadmill", x: -1.3, z: -0.4 },
+  { kind: "treadmill", x: -0.55, z: -0.95 },
+  { kind: "weights", x: 0.3, z: -1.05 },
+  { kind: "weights", x: 1.1, z: -0.65 },
+  { kind: "weights", x: 1.35, z: 0.25 }
 ];
-/** Pool basin (relative): 4 lanes along z; swimmers go from `swimFrom` to `swimTo` and back. */
+/** Pool basin (relative): 4 lanes along z; swimmers go from `swimFrom` to `swimTo` and back.
+ *  Eight sun loungers in a row on the street side, clear of the path in the middle (x = 0). */
 export const POOL = {
-  x: 0, z: -0.95, w: 2.0, d: 1.5,
-  lanes: [-0.75, -0.25, 0.25, 0.75],
-  swimFrom: -0.35, swimTo: -1.55,
-  loungers: [{ x: -1.45, z: 0.35 }, { x: 1.45, z: 0.35 }] as Pt[]
+  x: 0, z: -1.5, w: 3.8, d: 2.8,
+  lanes: [-1.35, -0.45, 0.45, 1.35],
+  swimFrom: -0.45, swimTo: -2.6,
+  loungers: [-2.7, -2.05, -1.4, -0.75, 0.75, 1.4, 2.05, 2.7].map((x) => ({ x, z: 1.0 })) as Pt[]
 };
-/** Open-air cinema (relative): the screen faces the seats (−z); 2 rows of 4 seats face +z. */
+/** Open-air cinema (relative): the screen faces the seats (−z); 2 rows of 5 seats face +z. */
 export const CINEMA = {
-  screen: { x: 0, z: 1.55, w: 2.2, h: 1.2 },
-  rows: [0.75, 0.25],
-  seatsX: [-0.9, -0.3, 0.3, 0.9]
+  screen: { x: 0, z: 2.0, w: 3.0, h: 1.6 },
+  rows: [0.95, 0.3],
+  seatsX: [-1.3, -0.65, 0, 0.65, 1.3]
 };
 
 const rel = (zone: string, p: Pt): Pt => {
@@ -211,7 +214,7 @@ function buildSpots(): SpotDef[] {
 // ---------------- rollercoaster ----------------
 
 /** Track oval (world): centre, radii; t = 0 is the station on the west side. */
-export const COASTER = { cx: 9.9, cz: 0.3, rx: 1.15, rz: 2.2, base: 0.35 };
+export const COASTER = { cx: 9.95, cz: 0.3, rx: 1.4, rz: 3.0, base: 0.35 };
 /** One ride, in seconds. */
 export const COASTER_RIDE_SECONDS = 40;
 /** The big drop, as track fractions [start, end] — riders throw their arms up here. */
@@ -219,7 +222,11 @@ export const COASTER_DROP: [number, number] = [0.3, 0.42];
 /** Seats in the cart (cart-local: x = sideways, z = along the track). */
 export const COASTER_SEATS: Pt[] = [{ x: -0.12, z: 0.1 }, { x: 0.12, z: 0.1 }, { x: -0.12, z: -0.24 }, { x: 0.12, z: -0.24 }];
 /** Where riders wait for the cart (world). */
-export const COASTER_QUEUE: Pt[] = [{ x: 8.35, z: 0.3 }, { x: 8.35, z: -0.15 }, { x: 7.95, z: -0.15 }, { x: 7.95, z: -0.6 }];
+/** (east of the pool road, which runs north from S7 at x = 7.5) */
+export const COASTER_QUEUE: Pt[] = [{ x: 8.2, z: -0.2 }, { x: 8.2, z: -0.65 }, { x: 7.95, z: -1.05 }, { x: 8.25, z: -1.15 }];
+
+/** Where the 4 riders step off after a ride (world): beside the gate, west of the rails. */
+export const COASTER_EXITS: Pt[] = [{ x: 7.8, z: 1.3 }, { x: 8.1, z: 1.3 }, { x: 7.8, z: 1.6 }, { x: 8.1, z: 1.6 }];
 
 /** Track height keyframes (t, y): flat station, lift hill, big drop, a small bump, back home. */
 const HEIGHT_KEYS: [number, number][] = [
