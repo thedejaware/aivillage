@@ -8,10 +8,15 @@
 import type { CSSProperties, ReactNode } from "react";
 import { MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
 import { C, FONT, Z, barStyle, caps, card, hex, iconButton, pill, relTime, type Tone } from "./theme";
+import { friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
 
 const CSS = `
 @keyframes hud-skel { 0%, 100% { opacity: 0.55 } 50% { opacity: 1 } }
 .hud-inspector { width: 330px; }
+.hud-info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: 5px; border-radius: 50%; border: 1px solid ${C.faint}; color: ${C.muted}; font-size: 9px; font-weight: 700; font-style: italic; font-family: Georgia, serif; cursor: help; vertical-align: 1px; outline: none; }
+.hud-info:hover, .hud-info:focus { border-color: ${C.blue}; color: ${C.blue}; }
+.hud-tip { display: none; position: absolute; left: -6px; top: 20px; z-index: 5; width: 230px; padding: 9px 11px; border-radius: 10px; background: ${C.text}; color: #fff; font: 400 12px/1.45 Inter, system-ui, sans-serif; font-style: normal; text-align: left; box-shadow: 0 8px 24px rgba(20,40,80,0.22); pointer-events: none; }
+.hud-info:hover .hud-tip, .hud-info:focus .hud-tip { display: block; }
 @media (max-width: 759px) {
   .hud-inspector { width: calc(100vw - 32px); max-height: 46vh !important; }
 }
@@ -25,10 +30,19 @@ function relTone(label: string): Tone {
   return "grey";
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/** ⓘ badge: shows `tip` on hover or keyboard focus. */
+function Info({ tip }: { tip: string }) {
+  return (
+    <span className="hud-info" tabIndex={0} role="note" aria-label={tip}>
+      i<span className="hud-tip" aria-hidden>{tip}</span>
+    </span>
+  );
+}
+
+function Row({ label, info, children }: { label: string; info?: string; children: ReactNode }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "7px 0", borderTop: `1px solid ${C.line}` }}>
-      <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>{label}{info && <Info tip={info} />}</span>
       <span style={{ fontSize: 13, color: C.text, fontWeight: 500, textAlign: "right", minWidth: 0 }}>{children}</span>
     </div>
   );
@@ -149,17 +163,12 @@ export function Inspector({
           </div>
 
           {place && <Row label="Location">{placeEmoji ? `${placeEmoji} ` : ""}{place}</Row>}
-          <Row label="Popularity">
-            {detail.popularity}
-            {detail.rank > 0 && detail.villagerCount > 0 && (
-              <span style={{ color: C.muted, fontWeight: 400 }}> · #{detail.rank} of {detail.villagerCount}</span>
-            )}
+          <Row label="Popularity" info={popularityTip(detail.name)}>
+            {popularityText(detail.rank, detail.villagerCount)}
           </Row>
-          <Row label="Friends">
-            {friends}
-            <span style={{ color: C.muted, fontWeight: 400 }}> · {rivals} rival{rivals === 1 ? "" : "s"}</span>
+          <Row label="Friends" info={friendsTip(detail.name)}>
+            {friendsText(friends, rivals)}
           </Row>
-          <Row label="Reputation">{detail.reputation}</Row>
           {energy && (
             <Row label="Energy">
               <span role="meter" aria-valuemin={0} aria-valuemax={MAX_STAMINA} aria-valuenow={stamina} aria-label={tired ? "Energy (tired)" : "Energy"} style={{ display: "inline-flex", alignItems: "center", gap: 8, width: 150 }}>
