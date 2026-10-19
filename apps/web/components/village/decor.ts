@@ -43,12 +43,15 @@ function sideRoadDist(p: Pt): number {
  * The shared house (relative to the home centre): turned so its front (+z
  * local) faces the door spot, with the door spot on the doorstep.
  */
+/** How much bigger the house is drawn than its first design (walls, roof, door…). */
+export const HOUSE_SCALE = 1.5;
+
 export const HOUSE_BODY = (() => {
   const door = HOUSE.door;
   const fx = door.x - HOUSE.x, fz = door.z - HOUSE.z;
   const len = Math.hypot(fx, fz);
   const ux = fx / len, uz = fz / len;
-  const w = 1.4, d = 1.1, step = 0.16;
+  const w = 1.4 * HOUSE_SCALE, d = 1.1 * HOUSE_SCALE, step = 0.16;
   return { x: door.x - ux * (d / 2 + step), z: door.z - uz * (d / 2 + step), yaw: Math.atan2(ux, uz), w, d };
 })();
 
@@ -88,7 +91,7 @@ type KeepOut = { kind: "ellipse"; x: number; z: number; rx: number; rz: number }
 const KEEP_OUT: KeepOut[] = (() => {
   const home = zoneCenter("home"), cafe = zoneCenter("maker_space"), pool = zoneCenter("pool"), cin = zoneCenter("cinema");
   return [
-    { kind: "ellipse", x: home.x + HOUSE_BODY.x, z: home.z + HOUSE_BODY.z, rx: 0.95, rz: 0.95 },
+    { kind: "ellipse", x: home.x + HOUSE_BODY.x, z: home.z + HOUSE_BODY.z, rx: 0.95 * HOUSE_SCALE, rz: 0.95 * HOUSE_SCALE },
     { kind: "rect", x: cafe.x + CAFE_BUILDING.x, z: cafe.z + CAFE_BUILDING.z, hw: CAFE_BUILDING.w / 2 + 0.12, hd: CAFE_BUILDING.d / 2 + 0.12 },
     { kind: "rect", x: pool.x + POOL_DECK.x, z: pool.z + POOL_DECK.z, hw: POOL_DECK.w / 2 + 0.05, hd: POOL_DECK.d / 2 + 0.05 },
     // the screen plus its legs and braces, which reach back (+z)

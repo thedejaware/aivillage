@@ -68,6 +68,7 @@ describe("the Main Street map", () => {
     expect(PAD_RADIUS.gym).toBeGreaterThanOrEqual(1.9);
     expect(PAD_RADIUS.cinema).toBeGreaterThanOrEqual(2.2);
     expect(PAD_RADIUS.maker_space).toBeGreaterThanOrEqual(2.1);
+    expect(PAD_RADIUS.home).toBeGreaterThanOrEqual(2.0);
   });
 
   it("zoneOfTile returns the nearest place", () => {

@@ -51,6 +51,7 @@ describe("buildings that stick out of their pads", () => {
   });
 
   it("the house stays on its pad", () => {
+    expect([HOUSE_BODY.w, HOUSE_BODY.d]).toEqual([1.4 * 1.5, 1.1 * 1.5]); // half again as big as the first house
     const r = Math.hypot(HOUSE_BODY.w / 2, HOUSE_BODY.d / 2);
     expect(Math.hypot(HOUSE_BODY.x, HOUSE_BODY.z) + r).toBeLessThan(PAD_RADIUS.home);
   });
@@ -143,7 +144,7 @@ describe("scatter", () => {
 describe("streetLamps", () => {
   it("line the street, off the tarmac and pads, not too close together", () => {
     const lamps = streetLamps();
-    expect(lamps.length).toBeGreaterThanOrEqual(8);
+    expect(lamps.length).toBeGreaterThanOrEqual(7); // the bigger house pad covers the street's first metre
     for (const l of lamps) {
       const d = streetDist(l);
       expect(d).toBeGreaterThan(STREET_W / 2);

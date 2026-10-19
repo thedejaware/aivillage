@@ -40,7 +40,7 @@ export const SEAT_Y: Record<ActivityKind, number> = {
 /** Radius of the paved pad (or lawn) around each venue's centre. */
 export const PAD_RADIUS: Record<string, number> = {
   plaza: 1.45,
-  home: 1.4,
+  home: 2.0,
   network_hub: 1.3,
   bike_rack: 1.2,
   maker_space: 2.2,

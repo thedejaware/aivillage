@@ -12,7 +12,7 @@ import { zoneCenter } from "../../../lib/village/layout";
 import { P, cachedGeo, glow, solid } from "../materials";
 import { Ball, Box, Bush, Cyl, RBox } from "../parts";
 import { PAD_TOP } from "../scenery";
-import { HOUSE_BODY } from "../decor";
+import { HOUSE_BODY, HOUSE_SCALE } from "../decor";
 import { VenuePad } from "./common";
 import { onScreen, type PlacesSim } from "./visibility";
 
@@ -49,9 +49,9 @@ function FlowerBox({ x, y, z }: { x: number; y: number; z: number }) {
   );
 }
 
-/** The cottage in its own frame: front (door) at +z. */
+/** The cottage in its own frame: front (door) at +z. Drawn at its first size; House scales it up. */
 function Cottage() {
-  const { w, d } = HOUSE_BODY;
+  const w = HOUSE_BODY.w / HOUSE_SCALE, d = HOUSE_BODY.d / HOUSE_SCALE;
   const slope = Math.atan2(ROOF_H, d / 2 + 0.1);
   const slabLen = Math.hypot(ROOF_H, d / 2 + 0.1) + 0.06;
   const gable = cachedGeo(`house-gable:${w}:${d}`, () => {
@@ -123,7 +123,9 @@ export function House() {
     <group position={[c.x, 0, c.z]}>
       <VenuePad zone={zone} color="#f3f0fb" />
       <group position={[HOUSE_BODY.x, PAD_TOP, HOUSE_BODY.z]} rotation={[0, HOUSE_BODY.yaw, 0]}>
-        <Cottage />
+        <group scale={HOUSE_SCALE}>
+          <Cottage />
+        </group>
         <Bush x={-HOUSE_BODY.w / 2 - 0.12} z={0.25} s={1.1} />
         <Bush x={HOUSE_BODY.w / 2 + 0.1} z={-0.3} s={0.9} rot={1.2} />
       </group>
@@ -164,7 +166,7 @@ function paintSleep(canvas: HTMLCanvasElement, count: number): void {
 export function SleepSign({ sim }: { sim?: PlacesSim | null }) {
   const c = zoneCenter("home");
   const base = useMemo(
-    () => new THREE.Vector3(c.x + HOUSE_BODY.x, PAD_TOP + WALL_H + ROOF_H + 0.55, c.z + HOUSE_BODY.z),
+    () => new THREE.Vector3(c.x + HOUSE_BODY.x, PAD_TOP + (WALL_H + ROOF_H) * HOUSE_SCALE + 0.55, c.z + HOUSE_BODY.z),
     [c.x, c.z]
   );
   const sphere = useMemo(() => new THREE.Sphere(base.clone(), 0.6), [base]);

@@ -45,7 +45,7 @@ export const NODES: Record<string, Pt> = {
   POOL: C("pool"),
   CINEMA: C("cinema"),
   FUN: { x: 8.2, z: 0.9 }, // the coaster station gate (the funfair centre is under the track)
-  S0: { x: -8.0, z: 0.2 },
+  S0: { x: -7.4, z: 0.4 }, // clear of the (bigger) house pad
   S1: { x: -6.6, z: -1.4 },
   S2: { x: -4.5, z: -0.5 },
   S3: { x: -2.0, z: 1.5 },
