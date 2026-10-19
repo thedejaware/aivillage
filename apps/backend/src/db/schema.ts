@@ -1,5 +1,5 @@
-import { pgTable, text, integer, boolean, timestamp, jsonb, uuid } from "drizzle-orm/pg-core";
-import type { Skills, OwnerOrder, Appearance, TwinPose } from "@aivillage/shared";
+import { pgTable, text, integer, boolean, timestamp, jsonb, uuid, index } from "drizzle-orm/pg-core";
+import type { Skills, OwnerOrder, Appearance, TwinPose, ConversationView } from "@aivillage/shared";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -111,3 +111,20 @@ export const villageSettings = pgTable("village_settings", {
   chattiness: text("chattiness").notNull().default("normal"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
+
+/** Every conversation between twins, in full, for the "Talks" tab (only the newest CONVERSATIONS_KEPT are kept). */
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** zone id where it happened; null if unknown */
+    zone: text("zone"),
+    /** "chat" | "talk" | "bigmove" */
+    kind: text("kind").$type<ConversationView["kind"]>().notNull(),
+    twins: jsonb("twins").$type<ConversationView["twins"]>().notNull(),
+    lines: jsonb("lines").$type<ConversationView["lines"]>().notNull(),
+    moment: text("moment")
+  },
+  (t) => ({ createdAtIdx: index("conversations_created_at_idx").on(t.createdAt) })
+);

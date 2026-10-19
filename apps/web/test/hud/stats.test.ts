@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
+import { energyNow, friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
 
 describe("popularity", () => {
   it("shows only the rank", () => {
@@ -31,5 +31,27 @@ describe("friends", () => {
     const tip = friendsTip("Mehmet");
     expect(tip).toMatch(/Liked: .*Mehmet likes/);
     expect(tip).toMatch(/Rivals: .*Mehmet dislikes/);
+  });
+});
+
+describe("energyNow (the inspector's live energy bar)", () => {
+  const T0 = Date.parse("2026-10-19T12:00:00Z");
+  const iso = (ms: number) => new Date(T0 + ms).toISOString();
+  const plan = { base: 25, issuedAt: iso(0), holdUntil: iso(600_000), energyTo: 100, arrivedAt: iso(10_000) };
+
+  it("without a plan it shows the server's value", () => {
+    expect(energyNow({ stamina: 64, energyPlan: null }, T0)).toEqual({ value: 64, charging: false });
+  });
+
+  it("with a plan it climbs on its own between server updates, one point every 4 s", () => {
+    expect(energyNow({ stamina: 25, energyPlan: plan }, T0 + 50_000)).toEqual({ value: 35, charging: true });
+  });
+
+  it("stays put while the twin is still walking", () => {
+    expect(energyNow({ stamina: 25, energyPlan: { ...plan, arrivedAt: null } }, T0 + 50_000)).toEqual({ value: 25, charging: false });
+  });
+
+  it("stops charging when full", () => {
+    expect(energyNow({ stamina: 25, energyPlan: plan }, T0 + 500_000)).toEqual({ value: 100, charging: false });
   });
 });

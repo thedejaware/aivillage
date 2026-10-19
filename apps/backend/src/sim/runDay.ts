@@ -12,10 +12,11 @@ import { DrizzleStructureRepository } from "../db/structureRepository.js";
 import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 import { DrizzleApprovalRepository } from "../db/approvalRepository.js";
 import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
+import { DrizzleConversationRepository, twinRefs, type NewConversation } from "../db/conversationRepository.js";
 import { spendBeat } from "../economy/energy.js";
 import { planBeat } from "../agent/planner.js";
 import { converse } from "./conversation.js";
-import { isBusyNow, isSettledNow, staminaAfter, staminaOf } from "./activity.js";
+import { isBusyNow, isSettledNow, settled, staminaAfter, staminaOf } from "./activity.js";
 
 export interface DayResult {
   /** One WorldState snapshot per beat — the client plays these back over time. */
@@ -125,6 +126,8 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
 
   const structures: Structure[] = await structRepo.listAll(); // scenery
   const newMemories: Memory[] = [];
+  /** Full conversations for the Talks tab, saved with the memories at the end. */
+  const newConversations: NewConversation[] = [];
   const says: Record<string, string> = {};
   const frames: WorldState[] = [];
 
@@ -170,7 +173,7 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
     orderZone(target) ?? orderZone(actor) ?? fallback;
 
   /** Apply an executed big move: deltas, moments, memories, bubbles. */
-  const executeMove = async (actor: Twin, kind: SocialMove, target: Twin): Promise<void> => {
+  const executeMove = async (actor: Twin, kind: SocialMove, target: Twin, zone: string): Promise<void> => {
     const [dAB, dBA] = MOVE_DELTAS[kind];
     const crossA = await shift(actor.id, target.id, dAB);
     const crossB = await shift(target.id, actor.id, dBA);
@@ -178,13 +181,16 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
     remember(actor.id, "bigmove", line, 3);
     remember(target.id, "bigmove", line, 3);
     says[actor.id] = line;
+    let moment: string | null = null;
     if (crossB) {
-      const momentText = `${target.name} now sees ${actor.name} as a ${crossB}.`;
-      remember(actor.id, "moment", momentText, 2);
-      remember(target.id, "moment", momentText, 2);
+      moment = `${target.name} now sees ${actor.name} as a ${crossB}.`;
+      remember(actor.id, "moment", moment, 2);
+      remember(target.id, "moment", moment, 2);
     } else if (crossA) {
-      remember(actor.id, "moment", `${actor.name} now sees ${target.name} as a ${crossA}.`, 2);
+      moment = `${actor.name} now sees ${target.name} as a ${crossA}.`;
+      remember(actor.id, "moment", moment, 2);
     }
+    newConversations.push({ zone, kind: "bigmove", twins: twinRefs([actor, target]), lines: [{ speaker: actor.name, text: line }], moment });
   };
 
   for (let beat = 0; beat < beats; beat++) {
@@ -274,9 +280,9 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           const target = twinByName.get(actionable.payload.targetName);
           if (target) {
             await approvalRepo.markConsumed(actionable.id);
-            await executeMove(w.twin, actionable.payload.move, target);
             // Plaza (THE STAGE): actor at {dc:-1, dr:0}, target at {dc:+0.8, dr:0}.
             const venue = sceneVenue(w.twin, target, "plaza");
+            await executeMove(w.twin, actionable.payload.move, target, venue);
             placeAtVenue(w.twin.id, target.id, venue, { dc: -1, dr: 0 }, { dc: 0.8, dr: 0 });
             updateZones(w, target, venue);
             w.recent.push(remember(w.twin.id, "note", "carried out the approved plan"));
@@ -311,6 +317,10 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           }
           // Café (maker_space): actor at {dc:-0.8, dr:+0.3}, target at {dc:+0.6, dr:-0.3}.
           const venue = sceneVenue(w.twin, targetTwin, "maker_space");
+          newConversations.push({
+            zone: venue, kind: "chat", twins: twinRefs([w.twin, targetTwin]),
+            lines: convo.lines, moment: convo.moment ?? null
+          });
           placeAtVenue(w.twin.id, targetTwin.id, venue, { dc: -0.8, dr: 0.3 }, { dc: 0.6, dr: -0.3 });
           updateZones(w, targetTwin, venue);
         } catch {
@@ -338,9 +348,9 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
       } else if (beatResult.verb === "bigmove" && targetTwin && beatResult.kind) {
         if (!w.twin.ownerUserId) {
           // NPCs act on impulse — no owner to ask.
-          await executeMove(w.twin, beatResult.kind, targetTwin);
           // Plaza (THE STAGE): actor at {dc:-1, dr:0}, target at {dc:+0.8, dr:0}.
           const venue = sceneVenue(w.twin, targetTwin, "plaza");
+          await executeMove(w.twin, beatResult.kind, targetTwin, venue);
           placeAtVenue(w.twin.id, targetTwin.id, venue, { dc: -1, dr: 0 }, { dc: 0.8, dr: 0 });
           updateZones(w, targetTwin, venue);
         } else if (await approvalRepo.hasPendingForTwin(w.twin.id)) {
@@ -375,10 +385,10 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
           // a place activity happens at the place (a partner is invited along); touch goes to the partner
           const zone = (action.place && zoneByName.has(action.place) ? action.place : null) ?? partnerZone ?? action.place ?? w.twin.locationZone;
           w.twin = {
-            ...w.twin,
+            ...settled(w.twin, runStartedAt),
             locationZone: zone,
-            stamina: staminaAfter(staminaOf(w.twin), action, zone),
             order: {
+              energyTo: staminaAfter(staminaOf(w.twin, runStartedAt), action, zone),
               kind: "act", auto: true, zone, targetName: partner?.name ?? null,
               label: partner ? `${action.label} ${partner.name}` : action.label,
               issuedAt: runStartedAt.toISOString(),
@@ -441,6 +451,15 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
 
   for (const w of work) await twinRepo.save(w.twin);
   for (const m of newMemories) await memRepo.append(m);
+  // Saving a conversation must never break the sim.
+  const convoRepo = new DrizzleConversationRepository(db);
+  for (const c of newConversations) {
+    try {
+      await convoRepo.add(c);
+    } catch (e) {
+      console.error("saving a conversation failed:", e);
+    }
+  }
 
   return { frames, structuresBuilt: 0 };
 }

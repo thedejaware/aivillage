@@ -8,6 +8,9 @@ import {
 } from "../../lib/village/layout";
 import { SEAT_Y } from "../../components/village/scenery";
 
+/** the arrival callback also passes the order's issuedAt (null when a test order has none) */
+const ARRIVED_AT = { asymmetricMatch: (v: unknown) => v === null || typeof v === "string", toString: () => "issuedAt" };
+
 /** Deterministic PRNG so behaviour is repeatable. */
 function seeded(seed = 42): () => number {
   let s = seed >>> 0;
@@ -91,7 +94,7 @@ describe("VillageSim owner orders", () => {
     expect(memo.mode).toBe("activity");
     expect(memo.anim).toBe("drink");
     expect(onOrderArrive).toHaveBeenCalledTimes(1);
-    expect(onOrderArrive).toHaveBeenCalledWith("memo", "☕ At THE CAFÉ");
+    expect(onOrderArrive).toHaveBeenCalledWith("memo", "☕ At THE CAFÉ", ARRIVED_AT);
     expect(memo.status).toBe("☕ At THE CAFÉ");
   });
 
@@ -144,7 +147,7 @@ describe("VillageSim owner orders", () => {
     sim.reconcile(world(at("memo", "plaza")), 0);
     const start = { ...sim.twins.get("memo")! };
     sim.reconcile(world(at("memo", "plaza", { kind: "stay", zone: "plaza", targetName: null, label: "Staying at THE STAGE" })), 0);
-    expect(onOrderArrive).toHaveBeenCalledWith("memo", "📍 Staying at THE STAGE");
+    expect(onOrderArrive).toHaveBeenCalledWith("memo", "📍 Staying at THE STAGE", ARRIVED_AT);
     run(sim, 0, 120);
     expect(dist(sim.twins.get("memo")!, start)).toBeLessThan(0.01);
   });
@@ -160,7 +163,7 @@ describe("VillageSim owner orders", () => {
     const ravi = sim.twins.get("ravi")!;
     expect(dist(ravi, raviStart)).toBeLessThan(0.01);
     expect(dist(memo, ravi)).toBeLessThan(1);
-    expect(onOrderArrive).toHaveBeenCalledWith("memo", "💬 Talking with Ravi");
+    expect(onOrderArrive).toHaveBeenCalledWith("memo", "💬 Talking with Ravi", ARRIVED_AT);
     const facing = Math.atan2(ravi.x - memo.x, ravi.z - memo.z);
     expect(Math.abs(Math.atan2(Math.sin(memo.yaw - facing), Math.cos(memo.yaw - facing)))).toBeLessThan(0.05);
   });
@@ -259,7 +262,7 @@ describe("VillageSim action orders", () => {
     const memo = sim.twins.get("memo")!;
     expect(memo.anim).toBe("jump");
     expect(memo.bubble).toBe("🦘");
-    expect(onOrderArrive).toHaveBeenCalledWith("memo", "🦘 jump");
+    expect(onOrderArrive).toHaveBeenCalledWith("memo", "🦘 jump", ARRIVED_AT);
     run(sim, 1, 6);
     expect(memo.anim).toBe("idle");
     run(sim, 7, 60);
@@ -468,7 +471,7 @@ describe("Main Street: a place action", () => {
     expect(memo.anim).toBe("watch");
     expect(spotOf(sim, "memo")?.kind).toBe("cinema");
     expect(avatarPose(memo, t).item).toBe("popcorn");
-    expect(onOrderArrive).toHaveBeenCalledWith("memo", "🎬 watch a movie");
+    expect(onOrderArrive).toHaveBeenCalledWith("memo", "🎬 watch a movie", ARRIVED_AT);
     run(sim, t, 19);
     expect(memo.anim).toBe("watch");
     run(sim, t + 19, 2);

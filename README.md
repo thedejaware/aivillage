@@ -56,23 +56,23 @@ The village pauses when you close the app. When you open it again, every twin is
   - **Style:** clothes, clothes colour, glasses and accessories.
 - Clothes, hair and facial hair are open to everyone.
 
-**Explore Main Street.** One winding street runs from the shared house to the rollercoaster. Drag to move around the map, right-drag (or two fingers) to rotate, scroll to zoom. Along the street:
+**Explore Main Street.** One winding street runs from the shared house to the rollercoaster. Drag to move around the map, Shift + drag (or right-drag) to rotate, two fingers on the trackpad or the mouse wheel to zoom. Along the street:
 
 | Place | What twins do there | Energy |
 |---|---|---|
 | 🏠 The house | sleep (they go inside; 💤 shows on the roof) | back to 100 |
 | 🌳 Quiet corner | read and rest on the bench | +20 |
-| 🚲 The bikes | ride along the street and back | −15 |
+| 🚲 The bikes | ride along the street and back | −8 |
 | ☕ The café | sit at a table, eat, drink coffee or fresh juice | +15 (juice +10) |
-| 🥕 The garden | dig, plant and pick vegetables — then juice at the café | −10 |
-| 🎤 The stage | sing and perform | −10 |
-| 🏋️ The gym | treadmill and weights | −25 |
-| 🏊 The pool | swim lengths, or sunbathe on a lounger | −25 (lounger +10) |
+| 🥕 The garden | dig, plant and pick vegetables — then juice at the café | −5 |
+| 🎤 The stage | sing and perform | −5 |
+| 🏋️ The gym | treadmill and weights | −12 |
+| 🏊 The pool | swim lengths, or sunbathe on a lounger | −12 (lounger +10) |
 | 🌸 The lawn | picnic and sit | +10 |
-| 🎬 The cinema | watch a movie under the sky, with popcorn | −5 |
-| 🎢 The rollercoaster | queue, ride, arms up on the drop 😱 | −15 |
+| 🎬 The cinema | watch a movie under the sky, with popcorn | −3 |
+| 🎢 The rollercoaster | queue, ride, arms up on the drop 😱 | −8 |
 
-**Energy.** Every twin has energy from 0 to 100 (see it in the twin's card). Activities use it; resting gives it back. Below 20 a twin is tired: it rests first (the house when it's nearly empty, otherwise the café or the quiet corner). If you tell a tired twin to do something tiring, it answers "I'm tired, let me rest first."
+**Energy.** Every twin has energy from 0 to 100 (see it in the twin's card). Activities use it; resting gives it back. Energy changes only once the twin gets there, one point at a time: resting gives +1 every 4 seconds (the bar fills while you watch), tiring activities take −1 every 6 seconds. A twin sent home sleeps until its energy is full. Below 20 a twin is tired: it rests first (the house when it's nearly empty, otherwise the café or the quiet corner). If you tell a tired twin to do something tiring, it answers "I'm tired, let me rest first."
 
 **Talk to your twin.** Your main twin is you in the village. Chat with it at the bottom left. It remembers what you tell it, and it does what you ask, if it can:
 

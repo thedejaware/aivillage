@@ -8,7 +8,7 @@ export interface PlaceDef {
   zone: PlaceId;
   label: string;
   emoji: string;
-  /** energy change when an activity here starts (the house refills to MAX_STAMINA) */
+  /** energy change of an activity here, applied slowly after arrival (the house refills to MAX_STAMINA) */
   stamina: number;
   /** how many twins can do the activity at once */
   capacity: number;
@@ -36,14 +36,14 @@ export const PLACES: PlaceDef[] = [
   p("home", "the house", "🏠", 0, 10, "sleep", { busy: true }),
   p("network_hub", "the quiet corner", "🌳", 20, 2, "read"),
   p("maker_space", "the café", "☕", 15, 8, "drink_coffee"),
-  p("garden", "the hobby garden", "🥕", -10, 3, "garden"),
-  p("plaza", "the stage", "🎤", -10, 1, "sing"),
-  p("gym", "the gym", "🏋️", -25, 5, "work_out", { busy: true }),
-  p("pool", "the pool", "🏊", -25, 12, "swim", { busy: true }),
+  p("garden", "the hobby garden", "🥕", -5, 3, "garden"),
+  p("plaza", "the stage", "🎤", -5, 1, "sing"),
+  p("gym", "the gym", "🏋️", -12, 5, "work_out", { busy: true }),
+  p("pool", "the pool", "🏊", -12, 12, "swim", { busy: true }),
   p("event_space", "the lawn", "🌸", 10, 4, "sit"),
-  p("cinema", "the cinema", "🎬", -5, 10, "watch_movie"),
-  p("funfair", "the rollercoaster", "🎢", -15, 4, "ride_coaster", { busy: true }),
-  p("bike_rack", "the bikes", "🚲", -15, 4, "ride_bike", { busy: true })
+  p("cinema", "the cinema", "🎬", -3, 10, "watch_movie"),
+  p("funfair", "the rollercoaster", "🎢", -8, 4, "ride_coaster", { busy: true }),
+  p("bike_rack", "the bikes", "🚲", -8, 4, "ride_bike", { busy: true })
 ];
 
 export function placeOf(zone: string | null | undefined): PlaceDef | undefined {

@@ -239,19 +239,19 @@ describe("applyCommand: energy", () => {
   const sena: Twin = { ...ravi, id: "sena", name: "Sena", locationZone: "maker_space" };
   const all = (t: Twin) => [t, ravi, sena];
 
-  it("starting an activity spends (or restores) energy and holds for its own length", () => {
+  it("starting an activity sets the energy it moves toward (slowly, after arrival) and holds for its own length", () => {
     const fresh = { ...me, stamina: 80 };
     const swim = applyCommand(fresh, { type: "act", action: "swim", target: null }, all(fresh), NOW);
-    expect(swim.twin.stamina).toBe(55);
-    expect(swim.twin.order).toMatchObject({ kind: "act", zone: "pool", action: { id: "swim" } });
+    expect(swim.twin.stamina).toBe(80); // nothing changes during the walk
+    expect(swim.twin.order).toMatchObject({ kind: "act", zone: "pool", action: { id: "swim" }, energyTo: 68 });
     expect(Date.parse(swim.twin.order!.holdUntil) - NOW.getTime()).toBe(actHoldMs(findAction("swim")!));
-    expect(applyCommand({ ...me, stamina: 50 }, { type: "act", action: "drink_coffee", target: null }, all(me), NOW).twin.stamina).toBe(65);
-    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "home" }, all(me), NOW).twin.stamina).toBe(100);
-    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "gym" }, all(me), NOW).twin.stamina).toBe(25);
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "act", action: "drink_coffee", target: null }, all(me), NOW).twin.order!.energyTo).toBe(65);
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "home" }, all(me), NOW).twin.order!.energyTo).toBe(100);
+    expect(applyCommand({ ...me, stamina: 50 }, { type: "go", zone: "gym" }, all(me), NOW).twin.order!.energyTo).toBe(38);
   });
 
   it("a twin without stored energy counts as rested", () => {
-    expect(applyCommand(me, { type: "act", action: "ride_coaster", target: null }, all(me), NOW).twin.stamina).toBe(85);
+    expect(applyCommand(me, { type: "act", action: "ride_coaster", target: null }, all(me), NOW).twin.order!.energyTo).toBe(92);
   });
 
   it("a tired twin refuses tiring orders with the exact line and goes to rest instead", () => {
@@ -262,7 +262,7 @@ describe("applyCommand: energy", () => {
       expect(out.changed).toBe(true);
       expect(out.target).toBeNull();
       expect(out.twin.order).toMatchObject({ kind: "act", auto: true, zone: "maker_space" });
-      expect(out.twin.stamina).toBeGreaterThan(15);
+      expect(out.twin.order!.energyTo).toBeGreaterThan(15);
     }
   });
 
@@ -270,7 +270,7 @@ describe("applyCommand: energy", () => {
     const out = applyCommand({ ...me, stamina: 5 }, { type: "act", action: "ride_bike", target: null }, all(me), NOW, () => 0, () => 0.9);
     expect(out.reply).toBe("I'm tired, let me rest first.");
     expect(out.twin.order).toMatchObject({ zone: "home", auto: true, action: { id: "sleep" } });
-    expect(out.twin.stamina).toBe(100);
+    expect(out.twin.order!.energyTo).toBe(100);
   });
 
   it("restful orders always work, even when tired", () => {
@@ -281,8 +281,26 @@ describe("applyCommand: energy", () => {
     expect(nap.twin.order!.auto).toBeFalsy();
     const lawn = applyCommand(tired, { type: "go", zone: "event_space" }, all(tired), NOW);
     expect(lawn.reply).toBeUndefined();
-    expect(lawn.twin.stamina).toBe(20);
+    expect(lawn.twin.order!.energyTo).toBe(20);
     expect(applyCommand(tired, { type: "act", action: "hug", target: "Ravi" }, all(tired), NOW, () => 50).reply).toBeUndefined();
+  });
+
+  it("going home means going to bed: the twin goes inside and sleeps", () => {
+    for (const text of ["go home", "go to the house", "go home and sleep", "rest at home", "sleep"]) {
+      const cmd = parseCommand(text, ["Ravi", "Sena"]);
+      expect(cmd, text).not.toBeNull();
+      const out = applyCommand({ ...me, stamina: 40 }, cmd!, all(me), NOW);
+      expect(out.twin.order, text).toMatchObject({ kind: "act", zone: "home", action: { id: "sleep" }, energyTo: 100 });
+    }
+    // the plain command too (the AI's chat replies use it)
+    expect(applyCommand(me, { type: "go", zone: "home" }, all(me), NOW).twin.order).toMatchObject({ kind: "act", action: { id: "sleep" } });
+  });
+
+  it("a new order keeps the energy gained so far", () => {
+    const sleeping = { ...me, stamina: 30, order: { kind: "act" as const, zone: "home", targetName: null, label: "sleep", issuedAt: new Date(NOW.getTime() - 120_000).toISOString(), holdUntil: new Date(NOW.getTime() + 600_000).toISOString(), energyTo: 100, arrivedAt: new Date(NOW.getTime() - 100_000).toISOString() } };
+    const out = applyCommand(sleeping, { type: "go", zone: "event_space" }, all(sleeping), NOW);
+    expect(out.twin.stamina).toBe(55); // 100 s asleep → +25
+    expect(out.twin.order!.energyTo).toBe(65);
   });
 
   it("'take Sena to the cinema': both meet AT the cinema, not where Sena is", () => {

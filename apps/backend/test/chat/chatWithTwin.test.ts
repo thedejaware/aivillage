@@ -152,13 +152,14 @@ describe("chatWithTwin: energy", () => {
     const t = await mine();
     expect(t.order).toMatchObject({ kind: "act", auto: true });
     expect(["maker_space", "network_hub"]).toContain(t.order!.zone);
-    expect(t.stamina).toBeGreaterThan(12);
+    expect(t.stamina).toBe(12); // rest starts once it gets there
+    expect(t.order!.energyTo).toBeGreaterThan(12);
   });
 
-  it("an order spends energy when it starts", async () => {
+  it("an order sets the energy it will spend once the twin is there", async () => {
     await sql().unsafe(`update twins set stamina = 90, owner_order = null where id = '${mineId}'`);
     await chatWithTwin(userId, "ride the rollercoaster", toolBrain({ text: "Wheee!", toolCalls: [] }), tdb.db);
-    expect(await mine()).toMatchObject({ stamina: 75, locationZone: "funfair", order: { kind: "act", zone: "funfair" } });
+    expect(await mine()).toMatchObject({ stamina: 90, locationZone: "funfair", order: { kind: "act", zone: "funfair", energyTo: 82 } });
   });
 
   it("'take Ravi to the cinema': Ravi comes along when he likes the twin", async () => {
@@ -167,7 +168,7 @@ describe("chatWithTwin: energy", () => {
     const out = await chatWithTwin(userId, "take Ravi to the cinema", toolBrain({ text: "", toolCalls: [] }), tdb.db);
     expect(out.order).toMatchObject({ zone: "cinema", targetName: "Ravi", action: { id: "watch_movie" } });
     const ravi = (await new DrizzleTwinRepository(tdb.db).getById(raviId))!;
-    expect(ravi).toMatchObject({ locationZone: "cinema", stamina: 85, order: { auto: true, zone: "cinema", targetName: "Memo", action: { id: "watch_movie" } } });
+    expect(ravi).toMatchObject({ locationZone: "cinema", stamina: 90, order: { auto: true, zone: "cinema", targetName: "Memo", action: { id: "watch_movie" }, energyTo: 87 } });
   });
 
   it("…and goes alone when Ravi says no", async () => {

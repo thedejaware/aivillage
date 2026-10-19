@@ -12,7 +12,8 @@ import { runDay } from "../../src/sim/runDay.js";
 import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
-import { actHoldMs, findAction, DEFAULT_ZONES, type LlmClient } from "@aivillage/shared";
+import { DrizzleConversationRepository } from "../../src/db/conversationRepository.js";
+import { actHoldMs, findAction, colorForId, DEFAULT_ZONES, type LlmClient } from "@aivillage/shared";
 
 // ─── zone centres (from DEFAULT_ZONES in world.ts) ───────────────────────────
 const zoneAt = (name: string) => {
@@ -426,13 +427,13 @@ describe("runDay: places and energy", () => {
     expect((await new DrizzleTwinRepository(tdb.db).getById(a))!.locationZone).not.toBe("pool");
   });
 
-  it("an act beat spends energy and holds for the activity's own length", async () => {
+  it("an act beat sets its energy target and holds for the activity's own length", async () => {
     const a = await add("Swim", "plaza", null, 70);
     const llm = new CannedLlmClient([JSON.stringify({ verb: "act", target: null, kind: null, action: "swim", narrative: "Swim dives in." })]);
     const before = Date.now();
     await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
     const saved = (await new DrizzleTwinRepository(tdb.db).getById(a))!;
-    expect(saved).toMatchObject({ stamina: 45, locationZone: "pool", order: { zone: "pool", action: { id: "swim" } } });
+    expect(saved).toMatchObject({ stamina: 70, locationZone: "pool", order: { zone: "pool", action: { id: "swim" }, energyTo: 58 } });
     expect(Date.parse(saved.order!.holdUntil) - before).toBeLessThanOrEqual(actHoldMs(findAction("swim")!) + 5_000);
     expect(Date.parse(saved.order!.holdUntil) - before).toBeGreaterThan(actHoldMs(findAction("swim")!) - 5_000);
   });
@@ -445,4 +446,74 @@ describe("runDay: places and energy", () => {
     await runDay(llm, { beats: 1, onlyTwinIds: [a], db: tdb.db });
     expect((await new DrizzleTwinRepository(tdb.db).getById(a))!.order).toMatchObject({ zone: "cinema", targetName: "Buddy" });
   });
+});
+
+// ─── the Talks tab: every conversation is saved in full ──────────────────────
+describe("runDay: saved conversations", () => {
+  it("a chat saves ALL its lines, both twins and the zone where it happened", async () => {
+    const { tdb, idA, idB } = await makeDb(["TalkA", "TalkB"]);
+    try {
+      const convo = JSON.stringify({
+        lines: [
+          { speaker: "TalkA", text: "hi" },
+          { speaker: "TalkB", text: "hey" },
+          { speaker: "TalkA", text: "nice day" },
+          { speaker: "TalkB", text: "it is" }
+        ],
+        deltaAtoB: 1, deltaBtoA: 1, moment: "TalkA and TalkB became friends"
+      });
+      const llm = new CannedLlmClient([mkChat("TalkA", "TalkB"), mkScheme("TalkB"), convo]);
+      await runDay(llm, { beats: 1, db: tdb.db });
+      const saved = await new DrizzleConversationRepository(tdb.db).recent(10);
+      expect(saved.length).toBe(1);
+      expect(saved[0]).toMatchObject({
+        kind: "chat",
+        zone: "maker_space",
+        twins: [
+          { id: idA, name: "TalkA", colorHex: colorForId(idA) },
+          { id: idB, name: "TalkB", colorHex: colorForId(idB) }
+        ],
+        lines: [
+          { speaker: "TalkA", text: "hi" },
+          { speaker: "TalkB", text: "hey" },
+          { speaker: "TalkA", text: "nice day" },
+          { speaker: "TalkB", text: "it is" }
+        ],
+        moment: "TalkA and TalkB became friends"
+      });
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("a big move saves its narration as one line", async () => {
+    const { tdb, idA, idB } = await makeDb(["MoveA", "MoveB"]);
+    try {
+      const llm = new CannedLlmClient([mkBigmove("MoveA", "MoveB"), mkScheme("MoveB")]);
+      await runDay(llm, { beats: 1, db: tdb.db });
+      const saved = await new DrizzleConversationRepository(tdb.db).recent(10);
+      expect(saved.length).toBe(1);
+      expect(saved[0]).toMatchObject({
+        kind: "bigmove",
+        zone: "plaza",
+        twins: [{ id: idA, name: "MoveA" }, { id: idB, name: "MoveB" }]
+      });
+      expect(saved[0].lines).toEqual([{ speaker: "MoveA", text: expect.stringContaining("confronts MoveB") }]);
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
+
+  it("a failing conversation store never breaks the day", async () => {
+    const { tdb } = await makeDb(["SafeA", "SafeB"]);
+    try {
+      // @ts-expect-error drizzle exposes raw client via session.client
+      await tdb.db.session.client.unsafe("drop table conversations");
+      const llm = new CannedLlmClient([mkChat("SafeA", "SafeB"), mkScheme("SafeB"), mkConvo("SafeA", "SafeB")]);
+      const { frames } = await runDay(llm, { beats: 1, db: tdb.db });
+      expect(frames.length).toBe(1);
+    } finally {
+      await tdb.stop();
+    }
+  }, 60_000);
 });

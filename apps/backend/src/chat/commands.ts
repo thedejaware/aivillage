@@ -3,7 +3,7 @@ import {
   isTired, placeOf, restPlaceFor
 } from "@aivillage/shared";
 import type { Twin, TwinCommand, OwnerOrder, PerformedAction } from "@aivillage/shared";
-import { REST_ACTION, TIRED_REPLY, isTiring, staminaAfter, staminaOf } from "../sim/activity.js";
+import { REST_ACTION, TIRED_REPLY, isTiring, settled, staminaAfter, staminaOf } from "../sim/activity.js";
 
 /**
  * Owner → twin commands. Claude's tool use is the primary way we learn what the
@@ -199,16 +199,16 @@ export interface AppliedCommand {
 
 /** Too tired for that: say so, and go and rest instead (an automatic order — the twin's own idea). */
 function goRest(twin: Twin, now: Date, random: () => number): AppliedCommand {
-  const stamina = staminaOf(twin);
+  const stamina = staminaOf(twin, now);
   const zone = restPlaceFor(stamina, random);
   const res = resolveAction({ action: REST_ACTION[zone] });
   const action: PerformedAction | null = res.ok ? res.action : null;
   return {
     twin: {
-      ...twin,
+      ...settled(twin, now),
       locationZone: zone,
-      stamina: staminaAfter(stamina, action, zone),
       order: {
+        energyTo: staminaAfter(stamina, action, zone),
         kind: "act", auto: true, zone, targetName: null,
         label: action ? action.label : `Resting at ${zoneName(zone)}`,
         action,
@@ -237,7 +237,8 @@ export function applyCommand(
   feelingOf: (targetId: string) => number = () => 0,
   random: () => number = Math.random
 ): AppliedCommand {
-  const tired = isTired(staminaOf(twin));
+  twin = settled(twin, now); // energy gained so far survives the new order
+  const tired = isTired(staminaOf(twin, now));
   const hold = (o: Omit<OwnerOrder, "issuedAt" | "holdUntil">): OwnerOrder => ({
     ...o,
     issuedAt: now.toISOString(),
@@ -254,13 +255,14 @@ export function applyCommand(
         changed: true
       };
     case "go":
+      // going home means going to bed: the twin goes inside and sleeps (not wait at the door)
+      if (cmd.zone === "home") return applyCommand(twin, { type: "act", action: "sleep", target: null }, all, now, feelingOf, random);
       if (tired && isTiring(null, cmd.zone)) return goRest(twin, now, random);
       return {
         twin: {
           ...twin,
           locationZone: cmd.zone,
-          stamina: staminaAfter(staminaOf(twin), null, cmd.zone),
-          order: hold({ kind: "go", zone: cmd.zone, targetName: null, label: `Heading to ${zoneName(cmd.zone)}` })
+          order: hold({ kind: "go", zone: cmd.zone, targetName: null, label: `Heading to ${zoneName(cmd.zone)}`, energyTo: staminaAfter(staminaOf(twin, now), null, cmd.zone) })
         },
         target: null,
         changed: true
@@ -296,17 +298,16 @@ export function applyCommand(
       const zone = atPlace ? action.place! : target ? target.locationZone : action.place ?? twin.locationZone;
       if (tired && isTiring(action, zone)) return goRest(twin, now, random);
       const said = Boolean(target && def && !consentGiven(def, feelingOf(target.id)));
-      const tooTired = Boolean(target && isTired(staminaOf(target)) && isTiring(action, zone));
+      const tooTired = Boolean(target && isTired(staminaOf(target, now)) && isTiring(action, zone));
       // a declined invitation: the twin goes alone; a refused touch still plays out as a refusal
       const declinedBy = atPlace && target && (said || tooTired) ? target : undefined;
       const partner = declinedBy ? undefined : target;
-      const stamina = staminaAfter(staminaOf(twin), action, zone);
       return {
         twin: {
           ...twin,
           locationZone: zone,
-          stamina,
           order: {
+            energyTo: staminaAfter(staminaOf(twin, now), action, zone),
             kind: "act",
             zone,
             targetName: partner?.name ?? null,

@@ -97,6 +97,16 @@ const CREATE_SQL = `
     score integer not null default 0,
     updated_at timestamptz not null default now()
   );
+  create table conversations (
+    id uuid primary key default gen_random_uuid(),
+    created_at timestamptz not null default now(),
+    zone text,
+    kind text not null,
+    twins jsonb not null,
+    lines jsonb not null,
+    moment text
+  );
+  create index conversations_created_at_idx on conversations (created_at);
 `;
 
 export interface TestDb { db: DB; stop: () => Promise<void>; }

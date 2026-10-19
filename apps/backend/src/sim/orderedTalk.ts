@@ -6,6 +6,7 @@ import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleStructureRepository } from "../db/structureRepository.js";
 import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
+import { DrizzleConversationRepository, twinRefs } from "../db/conversationRepository.js";
 import { converse } from "./conversation.js";
 
 /**
@@ -52,6 +53,16 @@ export async function talkOnArrival(actorId: string, targetId: string, llm: LlmC
       id: randomUUID(), twinId, kind: "chat", content: summary,
       importance: convo.moment ? 2 : 1, createdAt: new Date().toISOString()
     });
+  }
+
+  // Keep the whole talk for the Talks tab; a failed save never stops the talk.
+  try {
+    await new DrizzleConversationRepository(db).add({
+      zone: target.locationZone, kind: "talk", twins: twinRefs([actor, target]),
+      lines: convo.lines, moment: convo.moment ?? null
+    });
+  } catch (e) {
+    console.error("saving the conversation failed:", e);
   }
 
   // Both stand together where the target is.

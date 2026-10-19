@@ -1,4 +1,5 @@
 import { ACTIONS, PLACES, MAX_STAMINA, TIRED_BELOW, type Twin, type BeatResult, type Verb, type SocialMove, type LlmClient, type Memory } from "@aivillage/shared";
+import { staminaOf } from "../sim/activity.js";
 
 const ACTION_LIST = ACTIONS.map((a) => (a.target ? `${a.id} (with someone)` : a.id)).join(", ");
 /** Every place with its energy effect, e.g. "pool (-25 energy)". */
@@ -25,7 +26,7 @@ export function buildPrompt(twin: Twin, ctx: PlanContext): string {
     `You are ${twin.name}, living in AiVillage — a small village buzzing with friendships, rivalries and gossip.`,
     `Personality: ${twin.traits.join(", ") || "unremarkable"}. Your social goal: ${twin.goals.join(", ") || "find your place"}.`,
     `You are at "${twin.locationZone}". Villagers around: ${ctx.nearbyTwinNames.join(", ") || "no one"}.`,
-    `Your energy: ${twin.stamina ?? MAX_STAMINA}/100. Below ${TIRED_BELOW} you are tired: rest (café, quiet corner, lawn, sleep at home) instead of anything tiring.`,
+    `Your energy: ${staminaOf(twin)}/100. Below ${TIRED_BELOW} you are tired: rest (café, quiet corner, lawn, sleep at home) instead of anything tiring.`,
     `How you feel about people:\n${rels}`,
     ...(ctx.ownerFacts && ctx.ownerFacts.length > 0
       ? [

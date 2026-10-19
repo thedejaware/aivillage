@@ -3,7 +3,7 @@ import {
   findAction, isOrderActive, isTired, labelFor, placeOf, restPlaceFor,
   type LlmClient, type PlaceId, type Relationship, type Twin
 } from "@aivillage/shared";
-import { activityDelta, staminaAfter, REST_ACTION } from "../sim/activity.js";
+import { activityDelta, staminaAfter, staminaOf, REST_ACTION } from "../sim/activity.js";
 
 /**
  * What a twin does next after finishing an activity (O13). The AI writes a short
@@ -100,7 +100,7 @@ export function nextStepContext(
       : null;
   const nameOf = new Map(all.map((t) => [t.id, t.name] as const));
   return {
-    stamina: twin.stamina ?? MAX_STAMINA,
+    stamina: staminaOf(twin, now),
     lastDid,
     lastZone: last?.zone ?? null,
     places: placeOptions(all, twin.id, now),

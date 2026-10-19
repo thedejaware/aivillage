@@ -2,6 +2,8 @@ import {
   colorForId, isOrderActive, MAX_STAMINA, labelFor, orderStatus, ZONE_DISPLAY,
   type TwinDetail
 } from "@aivillage/shared";
+import { energyPlanOf } from "@aivillage/shared";
+import { staminaOf } from "../sim/activity.js";
 import type { DB } from "../db/client.js";
 import { getDb } from "../db/appDb.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
@@ -55,7 +57,8 @@ export async function twinDetail(
     zoneLabel: ZONE_DISPLAY[twin.locationZone] ?? twin.locationZone,
     reputation: twin.reputation,
     energy: twin.energy,
-    stamina: twin.stamina ?? MAX_STAMINA,
+    stamina: staminaOf(twin, now),
+    energyPlan: energyPlanOf(twin.stamina ?? MAX_STAMINA, twin.order, now),
     popularity: pop.get(twin.id) ?? 0,
     rank: ranked.findIndex((t) => t.id === twin.id) + 1,
     villagerCount: twins.length,

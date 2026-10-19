@@ -213,7 +213,7 @@ export interface SimTwin {
 export interface SimOptions {
   random?: () => number;
   /** fired once when a twin reaches the place its owner sent it */
-  onOrderArrive?: (twinId: string, status: string) => void;
+  onOrderArrive?: (twinId: string, status: string, issuedAt: string | null) => void;
   /** wandering + canned chats (default on) */
   ambient?: boolean;
 }
@@ -333,7 +333,7 @@ export class VillageSim {
   now = 0;
   private readonly random: () => number;
   private readonly ambient: boolean;
-  private readonly onOrderArrive?: (twinId: string, status: string) => void;
+  private readonly onOrderArrive?: (twinId: string, status: string, issuedAt: string | null) => void;
   private readonly pairCooldown = new Map<string, number>();
   private nextTalkScan = 0;
   private coasterStart = 0;
@@ -594,7 +594,7 @@ export class VillageSim {
     }
     if (tw.order.kind === "act" && !tw.task) this.perform(tw, now);
     tw.status = orderStatus(tw.order, true);
-    this.onOrderArrive?.(tw.id, tw.status);
+    this.onOrderArrive?.(tw.id, tw.status, tw.order.issuedAt ?? null);
   }
 
   // ---------------- place activities ----------------

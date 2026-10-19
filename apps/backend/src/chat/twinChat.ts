@@ -8,7 +8,7 @@ import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
 import { DrizzleChatRepository, type ChatMessage } from "../db/chatRepository.js";
 import { normalizeZone, parseCommand, applyCommand, commandAck } from "./commands.js";
-import { staminaAfter, staminaOf } from "../sim/activity.js";
+import { settled, staminaAfter, staminaOf } from "../sim/activity.js";
 import { clearQueuedSteps } from "../sim/stepQueue.js";
 
 export { normalizeZone };
@@ -58,7 +58,7 @@ function contextLines(twin: Twin, ctx: ChatContext, message: string): string[] {
     `Your current goals in the village: ${twin.goals.join(", ") || "none yet — ask your owner what matters to them"}.`,
     `THE VILLAGE MAP (you know every corner of it). Venues (zone id = name):`,
     map,
-    `You are currently at ${ZONE_DISPLAY[ctx.myZone] ?? ctx.myZone}. Your energy: ${twin.stamina ?? MAX_STAMINA}/100 (below ${TIRED_BELOW} you are tired and need rest).`,
+    `You are currently at ${ZONE_DISPLAY[ctx.myZone] ?? ctx.myZone}. Your energy: ${staminaOf(twin)}/100 (below ${TIRED_BELOW} you are tired and need rest).`,
     `Who is where right now:`,
     people,
     `Your recent village life:\n${life}`,
@@ -435,11 +435,11 @@ async function bringAlong(
   const action = order.action!;
   clearQueuedSteps(partner.id);
   await twinRepo.save({
-    ...partner,
+    ...settled(partner, at),
     locationZone: order.zone,
-    stamina: staminaAfter(staminaOf(partner), action, order.zone),
     order: {
       ...order, auto: true, targetName: actor.name,
+      energyTo: staminaAfter(staminaOf(partner, at), action, order.zone),
       label: `${action.label} with ${actor.name}`,
       action: { ...action, targetName: actor.name, refused: false }
     }
@@ -458,7 +458,7 @@ export async function releaseTwin(userId: string, dbOverride?: DB): Promise<bool
   const repo = new DrizzleTwinRepository(dbOverride ?? getDb());
   const twin = (await repo.listAll()).find((t) => t.ownerUserId === userId);
   if (!twin?.order) return false;
-  await repo.save({ ...twin, order: null });
+  await repo.save({ ...settled(twin, new Date()), order: null });
   return true;
 }
 

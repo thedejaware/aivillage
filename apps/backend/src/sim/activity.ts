@@ -1,5 +1,5 @@
 import {
-  MAX_STAMINA, applyStamina, isOrderActive, placeOf, staminaDelta,
+  MAX_STAMINA, applyStamina, isOrderActive, liveStamina, placeOf, settleEnergy, staminaDelta,
   type Twin
 } from "@aivillage/shared";
 
@@ -17,7 +17,15 @@ export const REST_ACTION: Record<string, string> = {
   pool: "sunbathe"
 };
 
-export const staminaOf = (t: Twin): number => t.stamina ?? MAX_STAMINA;
+/** Energy right now: it moves slowly toward the current activity's target once the twin is there. */
+export const staminaOf = (t: Twin, now: Date = new Date()): number => liveStamina(t.stamina ?? MAX_STAMINA, t.order, now);
+
+/** The twin with the energy gained so far written into `stamina` — call before replacing or clearing its order. */
+export function settled(t: Twin, now: Date): Twin {
+  const s = settleEnergy(t.stamina ?? MAX_STAMINA, t.order, now);
+  if (s.stamina === (t.stamina ?? MAX_STAMINA) && s.order === (t.order ?? null)) return t; // nothing gained yet
+  return { ...t, stamina: s.stamina, order: s.order };
+}
 
 /**
  * Energy change of doing `action` at `zone` (null action = just going there).
@@ -34,7 +42,7 @@ export function activityDelta(action: { id: string; place: string | null } | nul
   return place && place.mainAction === action.id ? place.stamina : 0;
 }
 
-/** Energy after the activity starts (costs and gains apply on start). */
+/** The energy an activity moves toward (stored as order.energyTo; reached slowly after arrival). */
 export function staminaAfter(stamina: number, action: { id: string; place: string | null } | null, zone: string): number {
   return applyStamina(stamina, zone, activityDelta(action, zone));
 }

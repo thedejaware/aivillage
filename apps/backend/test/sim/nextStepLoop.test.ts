@@ -92,14 +92,15 @@ describe("startNextStepLoop", () => {
     expect(await twin(id)).toMatchObject({ stamina: 50, order: null });
   });
 
-  it("a free twin gets its next activity: an auto act order, energy spent, a memory, one world emit", async () => {
+  it("a free twin gets its next activity: an auto act order with its energy target, a memory, one world emit", async () => {
     const id = await addTwin("Memo", { stamina: 80 });
     const emitWorld = vi.fn();
     const l = loop({ llm: fakeLlm({ Memo: step("pool", "swim") }), emitWorld });
     expect(await l.tick()).toBe(1);
     l.stop();
     const t = await twin(id);
-    expect(t.stamina).toBe(55);
+    expect(t.stamina).toBe(80); // energy moves only once the twin is there
+    expect(t.order!.energyTo).toBe(68);
     expect(t.locationZone).toBe("pool");
     expect(t.order).toMatchObject({ kind: "act", auto: true, zone: "pool", targetName: null, action: { id: "swim", anim: "swim" } });
     expect(Date.parse(t.order!.holdUntil) - T0.getTime()).toBe(actHoldMs(findAction("swim")!));
@@ -108,12 +109,12 @@ describe("startNextStepLoop", () => {
     expect(emitWorld).toHaveBeenCalledTimes(1);
   });
 
-  it("sleeping at home refills energy to 100", async () => {
+  it("sleeping at home aims energy at 100", async () => {
     const id = await addTwin("Memo", { stamina: 5 });
     const l = loop({ llm: fakeLlm({ Memo: step("home", "sleep") }) });
     await l.tick();
     l.stop();
-    expect(await twin(id)).toMatchObject({ stamina: 100, locationZone: "home" });
+    expect(await twin(id)).toMatchObject({ stamina: 5, locationZone: "home", order: { energyTo: 100 } });
   });
 
   it("skips twins busy with an order; the main twin is included when it has no owner order", async () => {
@@ -204,18 +205,18 @@ describe("startNextStepLoop", () => {
     const l = loop({ llm: fakeLlm({ Memo: step("gym", "work_out") }) });
     await l.tick();
     l.stop();
-    expect(await twin(id)).toMatchObject({ locationZone: "home", stamina: 100 });
+    expect(await twin(id)).toMatchObject({ locationZone: "home", stamina: 8, order: { energyTo: 100 } });
   });
 
-  it("an invited partner who likes the twin comes along: both go, both spend energy", async () => {
+  it("an invited partner who likes the twin comes along: both go, both will spend energy", async () => {
     const memo = await addTwin("Memo", { stamina: 80, createdSec: 1 });
     const sena = await addTwin("Sena", { stamina: 60, createdSec: 2 });
     await sql().unsafe(`insert into relationships (from_twin_id, to_twin_id, score) values ('${sena}', '${memo}', 20)`);
     const l = loop({ llm: fakeLlm({ Memo: step("cinema", "watch_movie", "Sena") }) });
     await l.tick();
     l.stop();
-    expect(await twin(memo)).toMatchObject({ stamina: 75, locationZone: "cinema", order: { auto: true, zone: "cinema", targetName: "Sena", action: { id: "watch_movie" } } });
-    expect(await twin(sena)).toMatchObject({ stamina: 55, locationZone: "cinema", order: { auto: true, zone: "cinema", targetName: "Memo", action: { id: "watch_movie" } } });
+    expect(await twin(memo)).toMatchObject({ stamina: 80, locationZone: "cinema", order: { auto: true, zone: "cinema", targetName: "Sena", action: { id: "watch_movie" }, energyTo: 77 } });
+    expect(await twin(sena)).toMatchObject({ stamina: 60, locationZone: "cinema", order: { auto: true, zone: "cinema", targetName: "Memo", action: { id: "watch_movie" }, energyTo: 57 } });
     const mem = await new DrizzleMemoryRepository(tdb.db).recent(sena, 3);
     expect(mem.some((m) => m.kind === "act")).toBe(true);
   });
@@ -260,7 +261,8 @@ describe("to-do list mode: one AI call plans several activities", () => {
     await l.tick();
     l.stop();
     expect(llm.generate).toHaveBeenCalledTimes(2);
-    expect((await twin(id)).stamina).toBe(100 - 25 + 15 - 5 - 25);
+    // each finished activity counted in full (nobody reported arrivals: a walk guess); the 4th just started
+    expect((await twin(id)).stamina).toBe(Math.min(100, 100 - 12 + 15) - 3);
   });
 
   it("queued steps don't count against the per-minute AI cap", async () => {
@@ -287,12 +289,12 @@ describe("to-do list mode: one AI call plans several activities", () => {
     const clock = { now: T0 };
     const l = loop({ llm, clock });
     await l.tick();
-    await sql().unsafe(`update twins set stamina = 15 where id = '${id}'`);
+    await sql().unsafe(`update twins set stamina = 15, owner_order = owner_order - 'energyTo' where id = '${id}'`);
     after(clock, actHoldMs(findAction("swim")!));
     await l.tick();
     const t = await twin(id);
     expect(["maker_space", "network_hub"]).toContain(t.order!.zone);
-    expect(t.stamina).toBeGreaterThan(15);
+    expect(t.order!.energyTo).toBeGreaterThan(15);
     expect(queuedSteps(id)).toEqual([]);
     after(clock, 200_000);
     await l.tick();

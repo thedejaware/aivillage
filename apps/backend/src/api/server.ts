@@ -9,11 +9,13 @@ import { startWorldClock } from "../sim/worldClock.js";
 import { startNextStepLoop } from "../sim/nextStepLoop.js";
 import { chatWithTwin, chatHistory, releaseTwin } from "../chat/twinChat.js";
 import { talkOnArrival, TalkScheduler } from "../sim/orderedTalk.js";
+import { arrive } from "../sim/arrival.js";
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleSettingsRepository, maskKey } from "../db/settingsRepository.js";
 import { buildWorldState } from "./worldState.js";
 import { ownerPanel } from "./onboard.js";
 import { twinDetail } from "./twinDetail.js";
+import { listConversations } from "./conversations.js";
 import { DrizzleApprovalRepository } from "../db/approvalRepository.js";
 import { getDb } from "../db/appDb.js";
 import {
@@ -324,12 +326,23 @@ app.post("/api/order/release", async (req, res) => {
   }
 });
 
-// The owner's client saw the twin arrive where it was sent → start a waiting talk now.
+// A client saw a twin arrive where its order sent it: energy starts changing now
+// (one point at a time), and for the owner's twin a waiting "talk to X" starts.
 app.post("/api/order/arrived", async (req, res) => {
   try {
+    const repo = new DrizzleTwinRepository(getDb());
+    const all = await repo.listAll();
+    const twinId = String(req.body?.twinId ?? "");
+    const issuedAt = String(req.body?.issuedAt ?? "");
+    const twin = twinId ? all.find((t) => t.id === twinId) : undefined;
+    const updated = twin && issuedAt ? arrive(twin, issuedAt, new Date()) : null;
+    if (updated) {
+      await repo.save(updated);
+      await emitWorld();
+    }
     const userId = String(req.body?.userId ?? "");
-    const mine = (await new DrizzleTwinRepository(getDb()).listAll()).find((t) => t.ownerUserId === userId);
-    res.json({ started: mine ? talks.arrived(mine.id) : false });
+    const mine = userId ? all.find((t) => t.ownerUserId === userId) : undefined;
+    res.json({ recorded: Boolean(updated), started: mine ? talks.arrived(mine.id) : false });
   } catch (e) {
     fail(res, e);
   }
@@ -338,6 +351,15 @@ app.post("/api/order/arrived", async (req, res) => {
 app.get("/api/chat", async (req, res) => {
   try {
     res.json({ messages: await chatHistory(String(req.query.userId ?? "")) });
+  } catch (e) {
+    fail(res, e);
+  }
+});
+
+// Talks tab: past twin conversations, newest first (?limit=50 max 200, ?before=<iso> for older ones).
+app.get("/api/conversations", async (req, res) => {
+  try {
+    res.json(await listConversations({ limit: req.query.limit, before: req.query.before }));
   } catch (e) {
     fail(res, e);
   }

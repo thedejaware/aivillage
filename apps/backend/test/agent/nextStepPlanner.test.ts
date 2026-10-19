@@ -57,7 +57,7 @@ describe("placeOptions (free room per place)", () => {
     expect(opts.map((p) => p.zone).sort()).toEqual(PLACES.map((p) => p.zone).sort());
     const pool = opts.find((p) => p.zone === "pool")!;
     expect(pool.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "swim", stamina: -25 }),
+      expect.objectContaining({ id: "swim", stamina: -12 }),
       expect.objectContaining({ id: "sunbathe", stamina: 10 })
     ]));
     expect(opts.find((p) => p.zone === "home")!.actions[0]).toMatchObject({ id: "sleep" });
@@ -72,7 +72,7 @@ describe("buildNextStepPrompt", () => {
     expect(p).toContain("swim at THE POOL");
     expect(p).toContain("cinema");
     expect(p).toContain("watch_movie");
-    expect(p).toContain("-25");
+    expect(p).toContain("-12");
     expect(p).toMatch(/below 20/);
     expect(p).toMatch(/rest/i);
     expect(p).toContain("Sena");
@@ -229,8 +229,8 @@ describe("planNextSteps (to-do list: one AI call → PLAN_STEPS activities)", ()
 
   it("energy is projected along the plan: the step that would tire the twin becomes rest", async () => {
     const plan = '[{"zone":"gym","action":"work_out","partner":null,"narrative":"a"},{"zone":"pool","action":"swim","partner":null,"narrative":"b"},{"zone":"cinema","action":"watch_movie","partner":null,"narrative":"c"}]';
-    const steps = await planNextSteps(me, ctxFor(40), llmSaying(plan), { random: () => 0.1 });
-    // 40 → gym 15 (tired) → the swim becomes rest, the plan stops there
+    const steps = await planNextSteps(me, ctxFor(30), llmSaying(plan), { random: () => 0.1 });
+    // 30 → gym 18 (tired) → the swim becomes rest, the plan stops there
     expect(steps.map((s) => s.zone)).toEqual(["gym", "maker_space"]);
   });
 

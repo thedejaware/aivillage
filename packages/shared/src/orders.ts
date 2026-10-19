@@ -33,6 +33,10 @@ export interface OwnerOrder {
   message?: string | null;
   /** chosen by the twin's own AI (not an order from the player) */
   auto?: boolean;
+  /** energy this activity moves toward, one point at a time after arrival (see energy.ts) */
+  energyTo?: number | null;
+  /** when a client saw the twin arrive (ISO); energy starts changing then */
+  arrivedAt?: string | null;
 }
 
 /** How long an owner order overrides the twin's autonomous life. */

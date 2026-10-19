@@ -5,10 +5,10 @@
  * who they are, what they're doing, how they stand, who they love/hate.
  */
 
-import type { CSSProperties, ReactNode } from "react";
-import { MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { ENERGY_GAIN_MS, MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
 import { C, FONT, Z, barStyle, caps, card, hex, iconButton, pill, relTime, type Tone } from "./theme";
-import { friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
+import { energyNow, friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
 
 const CSS = `
 @keyframes hud-skel { 0%, 100% { opacity: 0.55 } 50% { opacity: 1 } }
@@ -17,6 +17,8 @@ const CSS = `
 .hud-info:hover, .hud-info:focus { border-color: ${C.blue}; color: ${C.blue}; }
 .hud-tip { display: none; position: absolute; left: -6px; top: 20px; z-index: 5; width: 230px; padding: 9px 11px; border-radius: 10px; background: ${C.text}; color: #fff; font: 400 12px/1.45 Inter, system-ui, sans-serif; font-style: normal; text-align: left; box-shadow: 0 8px 24px rgba(20,40,80,0.22); pointer-events: none; }
 .hud-info:hover .hud-tip, .hud-info:focus .hud-tip { display: block; }
+@keyframes hud-charge { from { background-position: 0 0 } to { background-position: 14px 0 } }
+.hud-charging { background-image: linear-gradient(135deg, rgba(255,255,255,0.35) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.35) 75%, transparent 75%); background-size: 14px 14px; animation: hud-charge 0.9s linear infinite; }
 @media (max-width: 759px) {
   .hud-inspector { width: calc(100vw - 32px); max-height: 46vh !important; }
 }
@@ -28,6 +30,18 @@ function relTone(label: string): Tone {
   if (l.includes("friend")) return "green";
   if (l === "rival" || l === "nemesis") return "red";
   return "grey";
+}
+
+/** The clock, ticking once a second while `active` (else frozen at the last tick). */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const h = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(h);
+  }, [active]);
+  return now;
 }
 
 /** ⓘ badge: shows `tip` on hover or keyboard focus. */
@@ -96,12 +110,15 @@ export function Inspector({
   onFocus: () => void;
   style?: CSSProperties;
 }) {
+  // the energy bar moves on its own while an activity changes energy (one point at a time)
+  const now = useNow(Boolean(detail?.energyPlan));
   if (!detail && !loading) return null;
 
   const place = detail ? detail.zoneLabel || ZONE_DISPLAY[detail.zone] || detail.zone : "";
   const color = detail ? hex(detail.colorHex) : C.faint;
   // energy 0–100 (older servers don't send it yet: full)
-  const stamina = detail ? Math.round(detail.stamina ?? MAX_STAMINA) : MAX_STAMINA;
+  const live = detail ? energyNow(detail, now) : { value: MAX_STAMINA, charging: false };
+  const stamina = live.value;
   const tired = stamina < TIRED_BELOW;
   const friends = detail ? detail.relationships.filter((r) => r.score > 0).length : 0;
   const rivals = detail ? detail.relationships.filter((r) => r.score < 0).length : 0;
@@ -172,10 +189,15 @@ export function Inspector({
           {energy && (
             <Row label="Energy">
               <span role="meter" aria-valuemin={0} aria-valuemax={MAX_STAMINA} aria-valuenow={stamina} aria-label={tired ? "Energy (tired)" : "Energy"} style={{ display: "inline-flex", alignItems: "center", gap: 8, width: 150 }}>
-                <span style={energy.track}><span style={{ ...energy.fill, display: "block" }} /></span>
-                <span style={{ fontSize: 12, minWidth: 26, textAlign: "right" }}>{tired ? "😴 " : ""}{stamina}</span>
+                <span style={energy.track}><span className={live.charging ? "hud-charging" : undefined} style={{ ...energy.fill, display: "block" }} /></span>
+                <span style={{ fontSize: 12, minWidth: 26, textAlign: "right" }}>{live.charging ? "⚡ " : tired ? "😴 " : ""}{stamina}</span>
               </span>
             </Row>
+          )}
+          {live.charging && (
+            <div style={{ fontSize: 11, color: C.muted, textAlign: "right", marginTop: -3, paddingBottom: 4 }}>
+              Resting · +1 energy every {ENERGY_GAIN_MS / 1000} s
+            </div>
           )}
           {goal && <Row label="Goal">{goal}</Row>}
 

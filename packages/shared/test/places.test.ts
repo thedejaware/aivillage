@@ -19,7 +19,7 @@ describe("places", () => {
 
   it("energy effects follow the design", () => {
     const effect = (z: string) => placeOf(z)!.stamina;
-    expect([effect("gym"), effect("pool"), effect("bike_rack"), effect("funfair"), effect("garden"), effect("cinema")]).toEqual([-25, -25, -15, -15, -10, -5]);
+    expect([effect("gym"), effect("pool"), effect("bike_rack"), effect("funfair"), effect("garden"), effect("plaza"), effect("cinema")]).toEqual([-12, -12, -8, -8, -5, -5, -3]);
     expect([effect("maker_space"), effect("network_hub"), effect("event_space")]).toEqual([15, 20, 10]);
   });
 
@@ -73,7 +73,7 @@ describe("place actions", () => {
   });
 
   it("energy effect of an action", () => {
-    expect(staminaDelta(findAction("swim")!)).toBe(-25);
+    expect(staminaDelta(findAction("swim")!)).toBe(-12);
     expect(staminaDelta(findAction("drink_juice")!)).toBe(10);
     expect(staminaDelta(findAction("sunbathe")!)).toBe(10);
     expect(staminaDelta(findAction("hug")!)).toBe(0);

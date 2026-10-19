@@ -12,7 +12,7 @@ import {
   nextStepContext, planNextSteps, restStep, ruleNextStep, type NextStep
 } from "../agent/nextStepPlanner.js";
 import { OWNER_FACT_KIND } from "../chat/twinChat.js";
-import { activityDelta, isTiring, staminaAfter, staminaOf } from "./activity.js";
+import { activityDelta, isTiring, settled, staminaAfter, staminaOf } from "./activity.js";
 import { claimTwins, isClaimed, releaseTwins } from "./twinLocks.js";
 import { clearQueuedSteps, queuedSteps, queuedTwinIds, setQueuedSteps } from "./stepQueue.js";
 
@@ -71,13 +71,14 @@ export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date): 
     if (p && !isOrderActive(p.order, now)) {
       const feeling = (await relRepo.get(p.id, twin.id))?.score ?? 0;
       const def = findAction(action.id);
-      const tooTired = isTired(staminaOf(p)) && isTiring(action, zone);
+      const tooTired = isTired(staminaOf(p, now)) && isTiring(action, zone);
       if (def && consentGiven(def, feeling) && !tooTired) partner = p;
       else declined = p;
     }
   }
 
-  const orderWith = (withName: string | null): OwnerOrder => ({
+  const orderWith = (withName: string | null, who: Twin): OwnerOrder => ({
+    energyTo: staminaAfter(staminaOf(who, now), action, zone),
     kind: "act",
     auto: true,
     zone,
@@ -91,16 +92,15 @@ export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date): 
     memRepo.append({ id: randomUUID(), twinId, kind: "act", content, importance: 1, createdAt: now.toISOString() });
 
   const updated: Twin = {
-    ...twin,
+    ...settled(twin, now),
     locationZone: zone,
-    stamina: staminaAfter(staminaOf(twin), action, zone),
-    order: orderWith(partner?.name ?? null)
+    order: orderWith(partner?.name ?? null, twin)
   };
   await repo.save(updated);
   await remember(twin.id, step.narrative || `${twin.name} went to ${action.label}.`);
 
   if (partner) {
-    await repo.save({ ...partner, locationZone: zone, stamina: staminaAfter(staminaOf(partner), action, zone), order: orderWith(twin.name) });
+    await repo.save({ ...settled(partner, now), locationZone: zone, order: orderWith(twin.name, partner) });
     await remember(partner.id, `${partner.name} joined ${twin.name} to ${action.label}.`);
     await relRepo.applyDelta(twin.id, partner.id, 2);
     await relRepo.applyDelta(partner.id, twin.id, 2);

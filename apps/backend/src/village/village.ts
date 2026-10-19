@@ -9,6 +9,7 @@ import { users, twins, memories, relationships, chatMessages, approvals, structu
 import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleSettingsRepository } from "../db/settingsRepository.js";
 import { clearQueuedSteps } from "../sim/stepQueue.js";
+import { settled } from "../sim/activity.js";
 
 /**
  * The local village: one owner (no login — it's one person's app), up to
@@ -142,7 +143,7 @@ export async function updateTwin(db: DB, id: string, patch: TwinPatch): Promise<
 /** Hide the twin from the village; everything about it is kept. */
 export async function deactivateTwin(db: DB, id: string): Promise<Twin> {
   const t = await mustGet(db, id);
-  const updated: Twin = { ...t, active: false, order: null };
+  const updated: Twin = { ...settled(t, new Date()), active: false, order: null };
   await new DrizzleTwinRepository(db).save(updated);
   clearQueuedSteps(id);
   return updated;
@@ -156,7 +157,7 @@ export async function activateTwin(db: DB, id: string): Promise<Twin> {
   if (t.role === "main") {
     for (const other of await repo.listAll()) {
       if (other.role === "main") {
-        await repo.save({ ...other, active: false, order: null });
+        await repo.save({ ...settled(other, new Date()), active: false, order: null });
         clearQueuedSteps(other.id);
       }
     }

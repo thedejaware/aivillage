@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { DEFAULT_ZONES } from "@aivillage/shared";
+import { DEFAULT_ZONES, colorForId } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { CannedLlmClient } from "../../src/sim/cannedLlm.js";
 import { talkOnArrival } from "../../src/sim/orderedTalk.js";
 import { DrizzleRelationshipRepository } from "../../src/db/relationshipRepository.js";
 import { DrizzleMemoryRepository } from "../../src/db/memoryRepository.js";
 import { DrizzleTwinRepository } from "../../src/db/twinRepository.js";
+import { DrizzleConversationRepository } from "../../src/db/conversationRepository.js";
 
 let tdb: TestDb;
 let memoId: string;
@@ -60,6 +61,25 @@ describe("talkOnArrival", () => {
     const mem = new DrizzleMemoryRepository(tdb.db);
     expect((await mem.recent(memoId, 5)).some((m) => m.kind === "chat")).toBe(true);
     expect((await mem.recent(raviId, 5)).some((m) => m.kind === "chat")).toBe(true);
+  });
+
+  it("saves the whole talk for the Talks tab (kind talk, at the target's zone)", async () => {
+    const saved = await new DrizzleConversationRepository(tdb.db).recent(10);
+    expect(saved.length).toBe(1);
+    expect(saved[0]).toMatchObject({
+      kind: "talk",
+      zone: "event_space",
+      twins: [
+        { id: memoId, name: "Memo", colorHex: colorForId(memoId) },
+        { id: raviId, name: "Ravi", colorHex: colorForId(raviId) }
+      ],
+      lines: [
+        { speaker: "Memo", text: "My owner sent me to say hi!" },
+        { speaker: "Ravi", text: "Well, hi back." },
+        { speaker: "Memo", text: "Coffee later?" }
+      ],
+      moment: null
+    });
   });
 
   it("returns no frames when the brain fails, instead of throwing", async () => {

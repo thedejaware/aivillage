@@ -14,6 +14,7 @@ import { VillagerList, type VillagerRow } from "../components/hud/VillagerList";
 import { OrderTracker } from "../components/hud/OrderTracker";
 import { ApprovalCard } from "../components/hud/ApprovalCard";
 import { CaptionBar } from "../components/hud/CaptionBar";
+import { captionMs, enqueueCaptions, type Caption } from "../lib/hud/captions";
 import { C, Z, card } from "../components/hud/theme";
 
 const VillageCanvas = dynamic(() => import("../components/village/VillageCanvas"), { ssr: false });
@@ -22,17 +23,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const QUIET_FRAME_MS = 1100;
 const INSPECTOR_WIDTH = 340;
 
-/** One line on the TV caption bar (reality-show subtitles). */
-interface Caption {
-  twinId: string;
-  name: string;
-  color: string;
-  text: string;
-}
-
 const hexColor = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
-/** Reading time scaled to line length: 2s floor, 7s ceiling. */
-const captionDur = (text: string) => Math.min(7000, Math.max(2000, 1200 + text.length * 45));
 const orderKeyOf = (o: WorldTwinView["order"]) => (o ? `${o.kind}:${o.zone}:${o.targetName ?? ""}:${o.issuedAt ?? ""}` : "");
 
 interface Panel {
@@ -79,10 +70,15 @@ export default function Page() {
   /** the local owner (no login: one person's village) */
   const ownerRef = useRef<string | null>(null);
   const [caption, setCaption] = useState<Caption | null>(null);
+  /** lines waiting for the caption bar: a new conversation waits instead of cutting the current one */
+  const [captionQueue, setCaptionQueue] = useState<Caption[]>([]);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [chatEvent, setChatEvent] = useState<{ id: string; text: string } | null>(null);
   // ---- selection + inspector ----
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [talksVersion, setTalksVersion] = useState(0);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   const [detail, setDetail] = useState<TwinDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [focusRequest, setFocusRequest] = useState<{ id: string; n: number } | null>(null);
@@ -186,8 +182,8 @@ export default function Page() {
   }, [selectedId, loadDetail]);
 
   /**
-   * Episode playback: frames advance the world; every NEW spoken line plays
-   * one at a time on the TV caption bar while its speaker shows a 💬 marker.
+   * Episode playback: frames advance the world; every NEW spoken line joins the
+   * caption queue (shown one at a time, long enough to read — see captions.ts).
    */
   const playEpisode = useCallback(
     async (frames: WorldState[]) => {
@@ -201,24 +197,33 @@ export default function Page() {
         setState(withLiveOrders(f));
         const fresh = f.twins.filter((t) => t.say && t.say !== prevSay[t.id]);
         for (const t of f.twins) prevSay[t.id] = t.say;
-        if (fresh.length === 0) {
-          await sleep(QUIET_FRAME_MS);
-          continue;
+        if (fresh.length > 0) {
+          setCaptionQueue((q) => enqueueCaptions(q, fresh.map((t) => ({ twinId: t.id, name: t.name, color: hexColor(t.colorHex), text: t.say! }))));
         }
-        for (const t of fresh) {
-          if (playGen.current !== gen) return;
-          setCaption({ twinId: t.id, name: t.name, color: hexColor(t.colorHex), text: t.say! });
-          setSpeakingId(t.id);
-          await sleep(captionDur(t.say!));
-        }
+        await sleep(QUIET_FRAME_MS);
       }
       if (playGen.current !== gen) return;
-      setCaption(null);
-      setSpeakingId(null);
       refreshPanel();
     },
     [refreshPanel]
   );
+
+  // the caption bar: next waiting line when the bar is free; each stays captionMs(text)
+  useEffect(() => {
+    if (caption || captionQueue.length === 0) return;
+    const [next, ...rest] = captionQueue;
+    setCaptionQueue(rest);
+    setCaption(next);
+    setSpeakingId(next.twinId);
+  }, [caption, captionQueue]);
+  useEffect(() => {
+    if (!caption) return;
+    const h = setTimeout(() => {
+      setCaption(null);
+      setSpeakingId(null);
+    }, captionMs(caption.text));
+    return () => clearTimeout(h);
+  }, [caption]);
 
   useEffect(() => {
     const socket = io(API, { transports: ["websocket", "polling"] });
@@ -231,6 +236,7 @@ export default function Page() {
     });
     socket.on("day", ({ frames }: { frames: WorldState[] }) => {
       absorbOrders(frames[frames.length - 1]); // newest snapshot at the time it was sent
+      setTalksVersion((v) => v + 1); // Talks tab refreshes its list
       void playEpisode(frames);
     });
     return () => {
@@ -253,6 +259,8 @@ export default function Page() {
       if (pausedNow) return;
       pausedNow = true;
       playGen.current += 1;
+      setCaptionQueue([]); // nobody is watching: don't replay old lines on return
+      setCaption(null);
       socketRef.current?.disconnect();
       setPaused(true);
     };
@@ -322,23 +330,28 @@ export default function Page() {
   }, [speakingId, myOrder, arrivedKey, myOrderKey, myTwinId]);
 
   const onOrderArrive = useCallback(
-    (twinId: string, status: string) => {
-      if (twinId !== myTwinId || !myOrderRef.current) return;
-      const key = orderKeyOf(myOrderRef.current);
-      if (key === arrivedKeyRef.current) return; // a remounted scene re-reports the same arrival
-      arrivedKeyRef.current = key;
-      setChatEvent({ id: `arrive-${Date.now()}`, text: `✅ ${status}` });
-      setArrivedKey(key);
-      // "talk to X": the conversation starts the moment the twin gets there
-      if (myOrderRef.current?.kind === "talk_to" && userId) {
-        void fetch(`${API}/api/order/arrived`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ userId })
-        }).catch(() => { /* the server's fallback timer starts the talk */ });
+    (twinId: string, status: string, issuedAt: string | null) => {
+      const mine = twinId === myTwinId && myOrderRef.current;
+      const key = mine ? orderKeyOf(myOrderRef.current!) : "";
+      const firstTime = mine && key !== arrivedKeyRef.current; // a remounted scene re-reports the same arrival
+      if (firstTime) {
+        arrivedKeyRef.current = key;
+        setChatEvent({ id: `arrive-${Date.now()}`, text: `✅ ${status}` });
+        setArrivedKey(key);
       }
+      // every twin: energy starts changing now (the server ignores repeats);
+      // "talk to X": the owner's conversation starts the moment the twin gets there
+      const talk = firstTime && myOrderRef.current?.kind === "talk_to" && userId;
+      if (!issuedAt && !talk) return;
+      void fetch(`${API}/api/order/arrived`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ twinId, issuedAt, ...(talk ? { userId } : {}) })
+      })
+        .then(() => { if (twinId === selectedIdRef.current) void loadDetail(twinId, true); })
+        .catch(() => { /* energy then counts from a walk guess; the talk has a fallback timer */ });
     },
-    [myTwinId, userId]
+    [myTwinId, userId, loadDetail]
   );
 
   const select = useCallback((id: string | null, focus = false) => {
@@ -479,7 +492,7 @@ export default function Page() {
         )}
       </div>
 
-      <VillagerList villagers={villagers} selectedId={selectedId} onSelect={(id) => select(id, true)} />
+      <VillagerList villagers={villagers} selectedId={selectedId} onSelect={(id) => select(id, true)} talksVersion={talksVersion} />
 
       {/* ---- auto-pause: nobody watching → no AI spending ---- */}
       {paused && (

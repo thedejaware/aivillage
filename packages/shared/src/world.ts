@@ -1,5 +1,6 @@
 import { LAYOUT_VERSION, type Twin, type Structure, type ProjectType, type TwinPose } from "./types.js";
 import { MAX_STAMINA } from "./places.js";
+import { liveStamina, type EnergyPlan } from "./energy.js";
 import { validateAppearance, type Appearance } from "./appearance.js";
 import { isOrderActive, type OwnerOrder } from "./orders.js";
 
@@ -191,7 +192,7 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
       isMain: t.role === "main",
       // a pose saved on an older map would put the twin somewhere odd
       pose: t.pose && t.pose.layout === LAYOUT_VERSION ? t.pose : null,
-      stamina: t.stamina ?? MAX_STAMINA
+      stamina: liveStamina(t.stamina ?? MAX_STAMINA, t.order, now)
     };
   });
 
@@ -246,8 +247,10 @@ export interface TwinDetail {
   reputation: number;
   /** legacy beat budget (not shown) */
   energy: number;
-  /** energy 0–100, shown as "Energy" */
+  /** energy 0–100 right now, shown as "Energy" */
   stamina: number;
+  /** set while the current activity is changing energy: the bar moves on its own */
+  energyPlan: EnergyPlan | null;
   popularity: number;
   /** 1-based leaderboard position */
   rank: number;
@@ -256,4 +259,23 @@ export interface TwinDetail {
   orderStatus: string | null;
   relationships: { name: string; label: string; score: number }[];
   recent: { id: string; kind: string; content: string; createdAt: string }[];
+}
+
+/** How many past conversations the village keeps (older ones are deleted). */
+export const CONVERSATIONS_KEPT = 500;
+
+/** One saved conversation between twins, for the "Talks" tab (GET /api/conversations). */
+export interface ConversationView {
+  id: string;
+  createdAt: string; // ISO
+  /** where it happened (a zone id), null if unknown */
+  zone: string | null;
+  /** "chat": twins talking on their own; "talk": an owner's "talk to X" order; "bigmove": a confession, confrontation… */
+  kind: "chat" | "talk" | "bigmove";
+  /** the twins in it, in speaking order (names and colours as they were then) */
+  twins: { id: string; name: string; colorHex: number }[];
+  /** every line, in order (a big move has one line: the narration) */
+  lines: { speaker: string; text: string }[];
+  /** what changed between them ("Kwame and Sena became friends"), if anything */
+  moment: string | null;
 }

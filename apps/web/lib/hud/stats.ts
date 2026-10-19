@@ -1,3 +1,5 @@
+import { MAX_STAMINA, isCharging, liveStamina, type EnergyPlan } from "@aivillage/shared";
+
 /** Texts for the inspector's Popularity and Friends rows, and their ⓘ tips. */
 
 /** Rank among all villagers, e.g. "#5 of 10" (#1 = most liked). */
@@ -23,4 +25,11 @@ export function friendsTip(name: string): string {
     `Liked: twins ${name} likes. Rivals: twins ${name} dislikes. ` +
     `Feelings change with every chat and activity.`
   );
+}
+
+/** The energy to draw right now: the server's plan moves the bar between updates. */
+export function energyNow(d: { stamina?: number; energyPlan?: EnergyPlan | null }, now: number): { value: number; charging: boolean } {
+  const plan = d.energyPlan;
+  if (!plan) return { value: Math.round(d.stamina ?? MAX_STAMINA), charging: false };
+  return { value: liveStamina(plan.base, plan, now), charging: isCharging(plan.base, plan, now) };
 }

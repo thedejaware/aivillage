@@ -221,7 +221,7 @@ export default function VillageCanvas({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   /** fired once when a twin reaches the place its owner sent it */
-  onOrderArrive?: (twinId: string, status: string) => void;
+  onOrderArrive?: (twinId: string, status: string, issuedAt: string | null) => void;
   /** bump `n` to glide the camera to twin `id` */
   focusRequest?: { id: string; n: number } | null;
   /** keeps the camera buttons clear of the inspector card */
@@ -233,7 +233,7 @@ export default function VillageCanvas({
 }) {
   const onArriveRef = useRef(onOrderArrive);
   onArriveRef.current = onOrderArrive;
-  const sim = useMemo(() => new VillageSim({ onOrderArrive: (id, s) => onArriveRef.current?.(id, s) }), []);
+  const sim = useMemo(() => new VillageSim({ onOrderArrive: (id, s, at) => onArriveRef.current?.(id, s, at) }), []);
   const cameraApi = useRef<CameraApi | null>(null);
   const simClock = useRef(0);
   const [dayness, setDayness] = useState(() => daynessAt(Date.now()));
