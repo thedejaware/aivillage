@@ -1,4 +1,6 @@
 import type { PerformedAction } from "./actions.js";
+import type { Dish } from "./dishes.js";
+import type { EnergyPhase } from "./energy.js";
 
 // --- Owner orders: the owner tells their twin what to do, and it DOES it ---
 
@@ -10,7 +12,7 @@ export type TwinCommand =
   | { type: "stay" }
   | { type: "free" }
   /** do an action from the catalogue (or a mime); target = partner for social actions */
-  | { type: "act"; action: string; target: string | null; label?: string; emoji?: string };
+  | { type: "act"; action: string; target: string | null; label?: string; emoji?: string; dish?: Dish };
 
 export type OrderKind = "go" | "talk_to" | "stay" | "act";
 
@@ -37,6 +39,8 @@ export interface OwnerOrder {
   energyTo?: number | null;
   /** when a client saw the twin arrive (ISO); energy starts changing then */
   arrivedAt?: string | null;
+  /** energy steps with their own rates (the kitchen: cook, carry, eat); wins over energyTo */
+  energyPhases?: EnergyPhase[] | null;
 }
 
 /** How long an owner order overrides the twin's autonomous life. */

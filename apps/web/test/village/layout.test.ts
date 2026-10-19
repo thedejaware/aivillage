@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DEFAULT_ZONES, PLACES, placeOf } from "@aivillage/shared";
 import {
   findRoute, NODES, EDGES, SPOTS, zoneCenter, tileToWorld, zoneOfTile, ISLAND_HALF, GRID_MIN, GRID_MAX,
-  COASTER_TRACK, coasterPose, COASTER_QUEUE, COASTER_EXITS, BIKE_ROUTE, spotsFor, type Pt
+  COASTER_TRACK, coasterPose, COASTER_QUEUE, COASTER_EXITS, BIKE_ROUTE, spotsFor, KITCHEN, LIBRARY, type Pt
 } from "../../lib/village/layout";
 import { PAD_RADIUS, SEAT_Y } from "../../components/village/scenery";
 import { WALK_SPEED } from "../../lib/village/sim";
@@ -81,6 +81,7 @@ describe("spots", () => {
     for (const p of PLACES) {
       const n = spotsFor(p.zone).length;
       if (p.zone === "home") expect(n).toBe(1);
+      else if (p.zone === "kitchen") expect(spotsFor("kitchen").filter((s) => s.kind === "counter")).toHaveLength(p.capacity); // one board each
       else expect(n, p.zone).toBe(p.capacity);
     }
   });
@@ -137,6 +138,43 @@ describe("spots", () => {
     expect(kinds("bike_rack")).toEqual(["bike"]);
     expect(kinds("funfair")).toEqual(["coaster"]);
     expect(placeOf("pool")!.capacity).toBe(spotsFor("pool").length);
+  });
+});
+
+describe("the kitchen", () => {
+  it("sits between the Quiet Corner and the Gym", () => {
+    const k = zoneCenter("kitchen"), q = zoneCenter("network_hub"), g = zoneCenter("gym");
+    expect(k.x).toBeGreaterThan(q.x);
+    expect(k.x).toBeLessThan(g.x);
+    expect(PAD_RADIUS.kitchen).toBeGreaterThanOrEqual(PAD_RADIUS.maker_space); // about the café's size
+  });
+
+  it("4 cooking stations: a board on the island and a burner behind it, then 8 seats at one long table", () => {
+    const kinds = (k: string) => spotsFor("kitchen").filter((s) => s.kind === k);
+    expect(kinds("counter")).toHaveLength(4);
+    expect(kinds("stove")).toHaveLength(4);
+    expect(kinds("table")).toHaveLength(8);
+    expect(KITCHEN.stations).toHaveLength(4);
+    // each seat faces the table
+    const c = zoneCenter("kitchen");
+    for (const s of kinds("table")) {
+      const tx = c.x + KITCHEN.table.x, sx = s.x;
+      expect(Math.sign(Math.sin(s.yaw)), s.id).toBe(Math.sign(tx - sx));
+    }
+  });
+});
+
+describe("the library", () => {
+  it("is next to the Quiet Corner, reached through it", () => {
+    const l = zoneCenter("library"), q = zoneCenter("network_hub");
+    expect(Math.hypot(l.x - q.x, l.z - q.z)).toBeLessThan(5);
+    expect(EDGES.some(([a, b]) => (a === "LIBRARY" && b === "QUIET") || (a === "QUIET" && b === "LIBRARY"))).toBe(true);
+  });
+
+  it("4 armchairs to read and 4 desks to study", () => {
+    expect(spotsFor("library").filter((s) => s.kind === "armchair")).toHaveLength(4);
+    expect(spotsFor("library").filter((s) => s.kind === "desk")).toHaveLength(4);
+    expect(LIBRARY.desks).toHaveLength(4);
   });
 });
 

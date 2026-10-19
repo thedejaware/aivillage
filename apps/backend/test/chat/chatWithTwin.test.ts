@@ -150,10 +150,8 @@ describe("chatWithTwin: energy", () => {
     expect(out.reply).toBe("I'm tired, let me rest first.");
     expect(out.worldChanged).toBe(true);
     const t = await mine();
-    expect(t.order).toMatchObject({ kind: "act", auto: true });
-    expect(["maker_space", "network_hub"]).toContain(t.order!.zone);
-    expect(t.stamina).toBe(12); // rest starts once it gets there
-    expect(t.order!.energyTo).toBeGreaterThan(12);
+    expect(t.order).toMatchObject({ kind: "act", auto: true, zone: "home", action: { id: "sleep" }, energyTo: 100 });
+    expect(t.stamina).toBe(12); // sleep starts once it gets there
   });
 
   it("an order sets the energy it will spend once the twin is there", async () => {
@@ -178,6 +176,43 @@ describe("chatWithTwin: energy", () => {
     expect(out.order).toMatchObject({ zone: "cinema", targetName: null });
     expect((await new DrizzleTwinRepository(tdb.db).getById(raviId))!.order).toBeNull();
     expect(out.reply).toMatch(/Ravi/);
+  });
+});
+
+describe("chatWithTwin: the kitchen", () => {
+  // @ts-expect-error drizzle exposes raw client via session.client
+  const sql = () => tdb.db.session.client as { unsafe: (q: string) => Promise<Record<string, unknown>[]> };
+
+  it("'cook pasta' (no AI): the twin goes to cook it and says so", async () => {
+    await sql().unsafe(`update twins set stamina = 70, owner_order = null`);
+    const out = await chatWithTwin(userId, "cook pasta", null, tdb.db);
+    expect(out.reply).toContain("On it — cooking pasta!");
+    const t = await mine();
+    expect(t).toMatchObject({ locationZone: "kitchen", order: { zone: "kitchen", action: { id: "cook", dish: { name: "pasta", look: "pasta" } } } });
+    expect(t.order!.energyPhases!.length).toBeGreaterThan(0);
+  });
+
+  it("the model called do_action cook without the dish: the owner's words still name it", async () => {
+    await sql().unsafe(`update twins set stamina = 70, owner_order = null`);
+    await chatWithTwin(userId, "cook me a steak please", toolBrain({ text: "Yum!", toolCalls: [{ name: "do_action", input: { action: "cook" } }] }), tdb.db);
+    expect((await mine()).order!.action!.dish).toEqual({ name: "steak", look: "steak" });
+  });
+
+  it("'cook pasta with Ravi': Ravi comes along and cooks the same dish", async () => {
+    await sql().unsafe(`update twins set stamina = 90, owner_order = null; delete from relationships;
+      insert into relationships (from_twin_id, to_twin_id, score) values ('${raviId}', '${mineId}', 30)`);
+    await chatWithTwin(userId, "cook pasta with Ravi", toolBrain({ text: "", toolCalls: [] }), tdb.db);
+    const ravi = (await new DrizzleTwinRepository(tdb.db).getById(raviId))!;
+    expect(ravi).toMatchObject({ locationZone: "kitchen", order: { auto: true, zone: "kitchen", targetName: "Memo", action: { id: "cook", dish: { name: "pasta" } } } });
+    expect(ravi.order!.energyPhases!.length).toBeGreaterThan(0);
+    expect(ravi.order!.energyTo ?? null).toBeNull();
+  });
+
+  it("a tired twin asked to cook goes home to sleep", async () => {
+    await sql().unsafe(`update twins set stamina = 12, owner_order = null where id = '${mineId}'`);
+    const out = await chatWithTwin(userId, "cook pasta", null, tdb.db);
+    expect(out.reply).toBe("I'm tired, let me rest first.");
+    expect((await mine()).order).toMatchObject({ zone: "home", action: { id: "sleep" } });
   });
 });
 

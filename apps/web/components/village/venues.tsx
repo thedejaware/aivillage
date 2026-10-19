@@ -4,7 +4,8 @@
  * Every place on Main Street, built around the layout's anchors so the spots
  * twins use (SPOTS) line up with a chair, seat, lane, plot, station or slot.
  * Static scenery goes into one StaticBatch; the few moving parts (cinema
- * picture, pool water, coaster cart, bikes, 💤 sign) live outside it and only
+ * picture, pool water, coaster cart, bikes, 💤 sign, kitchen food + steam, desk
+ * laptops) live outside it and only
  * work while they are on screen. Each place is in ./venues/*.
  */
 import { useEffect, useMemo, useRef } from "react";
@@ -26,6 +27,8 @@ import { PoolStatic, PoolWater } from "./venues/pool";
 import { CinemaScreen, CinemaStatic } from "./venues/cinema";
 import { CoasterCart, FunfairStatic } from "./venues/coaster";
 import { BikeRack, Bikes } from "./venues/bikes";
+import { KitchenLive, KitchenStatic } from "./venues/kitchen";
+import { DeskLaptops, LibraryStatic } from "./venues/library";
 import type { PlacesSim } from "./venues/visibility";
 
 export type { PlacesSim } from "./venues/visibility";
@@ -195,12 +198,16 @@ export function Venues({ night, overflow, sim }: { night: number; overflow: Map<
         <Lawn />
         <CinemaStatic />
         <FunfairStatic />
+        <KitchenStatic />
+        <LibraryStatic />
       </StaticBatch>
       <PoolWater />
       <CinemaScreen />
       <CoasterCart sim={sim} />
       <Bikes sim={sim} />
       <SleepSign sim={sim} />
+      <KitchenLive sim={sim} />
+      <DeskLaptops sim={sim} />
       <VenueLights night={night} />
       {Object.keys(PAD_RADIUS).map((z) => <VenueSign key={z} zone={z} more={overflow.get(z) ?? 0} />)}
     </group>

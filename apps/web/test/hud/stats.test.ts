@@ -37,13 +37,13 @@ describe("friends", () => {
 describe("energyNow (the inspector's live energy bar)", () => {
   const T0 = Date.parse("2026-10-19T12:00:00Z");
   const iso = (ms: number) => new Date(T0 + ms).toISOString();
-  const plan = { base: 25, issuedAt: iso(0), holdUntil: iso(600_000), energyTo: 100, arrivedAt: iso(10_000) };
+  const plan = { base: 25, issuedAt: iso(0), holdUntil: iso(600_000), energyTo: 100, arrivedAt: iso(10_000), zone: "home" };
 
   it("without a plan it shows the server's value", () => {
     expect(energyNow({ stamina: 64, energyPlan: null }, T0)).toEqual({ value: 64, charging: false });
   });
 
-  it("with a plan it climbs on its own between server updates, one point every 4 s", () => {
+  it("with a plan it climbs on its own between server updates, one point every 4 s asleep", () => {
     expect(energyNow({ stamina: 25, energyPlan: plan }, T0 + 50_000)).toEqual({ value: 35, charging: true });
   });
 

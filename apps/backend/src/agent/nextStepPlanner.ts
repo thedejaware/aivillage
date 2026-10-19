@@ -1,9 +1,9 @@
 import {
-  ACTIONS, PLACES, PLAN_STEPS, MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY,
-  findAction, isOrderActive, isTired, labelFor, placeOf, restPlaceFor,
-  type LlmClient, type PlaceId, type Relationship, type Twin
+  ACTIONS, KITCHEN_DISHES, PLACES, PLAN_STEPS, MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY,
+  findAction, isOrderActive, isTired, kitchenEnergyPhases, labelFor, placeOf, restPlaceFor,
+  type Dish, type LlmClient, type PlaceId, type Relationship, type Twin
 } from "@aivillage/shared";
-import { activityDelta, staminaAfter, staminaOf, REST_ACTION } from "../sim/activity.js";
+import { activityDelta, dishNamed, isTiring, randomDish, staminaAfter, staminaOf, REST_ACTION } from "../sim/activity.js";
 
 /**
  * What a twin does next after finishing an activity (O13). The AI writes a short
@@ -19,14 +19,18 @@ export interface NextStep {
   /** a villager invited along ("take Sena to the cinema"), or null */
   partner: string | null;
   narrative: string;
+  /** "cook": what to cook */
+  dish?: Dish;
 }
 
 export interface PlaceActionOption {
   id: string;
   label: string;
-  /** energy change when it starts (sleep: refills to MAX_STAMINA) */
+  /** net energy change (sleep: refills to MAX_STAMINA; cooking: −6 then +12 → +6) */
   stamina: number;
   refill: boolean;
+  /** costs energy first (a tired twin isn't offered it): tiring places, studying, cooking */
+  tiring: boolean;
 }
 
 export interface PlaceOption {
@@ -66,7 +70,7 @@ function actionsAt(zone: PlaceId): PlaceActionOption[] {
     const def = findAction(id);
     if (!def) return [];
     const refill = id === "sleep";
-    return [{ id, label: def.label, stamina: refill ? MAX_STAMINA : activityDelta(def, zone), refill }];
+    return [{ id, label: def.label, stamina: refill ? MAX_STAMINA : activityDelta(def, zone), refill, tiring: isTiring(def, zone) }];
   });
 }
 
@@ -116,25 +120,49 @@ export function nextStepContext(
 
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
+/** A meal's energy: points lost while preparing and cooking, then gained while eating. */
+function mealEnergy(): { cost: number; gain: number } {
+  let cost = 0;
+  let gain = 0;
+  for (const ph of kitchenEnergyPhases("pasta")) {
+    const pts = Math.floor(ph.ms / ph.everyMs);
+    if (ph.dir < 0) cost += pts;
+    if (ph.dir > 0) gain += pts;
+  }
+  return { cost, gain };
+}
+
+/** "cook a dish: -6 energy while cooking, then +12 eating" — the planner and the beat prompt both say it. */
+export function cookEnergyText(): string {
+  const { cost, gain } = mealEnergy();
+  return `cook a dish: -${cost} energy while cooking, then +${gain} eating`;
+}
+
+const actionText = (a: PlaceActionOption) =>
+  a.id === "cook"
+    ? `cook (${cookEnergyText()}; say which dish in "dish")`
+    : `${a.id} (${a.refill ? "energy back to 100" : `${signed(a.stamina)} energy`})`;
+
 /** The planning prompt. count > 1 = to-do-list mode (a JSON array of steps). */
 export function buildNextStepPrompt(twin: Twin, ctx: NextStepContext, count: number = PLAN_STEPS): string {
   const tired = isTired(ctx.stamina);
   const places = ctx.places
     .map((p) => {
-      const acts = p.actions.filter((a) => !tired || a.refill || a.stamina >= 0);
+      const acts = p.actions.filter((a) => !tired || a.refill || (!a.tiring && a.stamina >= 0));
       if (acts.length === 0) return null;
-      const list = acts.map((a) => `${a.id} (${a.refill ? "energy back to 100" : `${signed(a.stamina)} energy`})`).join(", ");
+      const list = acts.map(actionText).join(", ");
       return `- ${p.zone} "${p.name}" (${p.free} free): ${list}`;
     })
     .filter(Boolean)
     .join("\n");
   const rels = ctx.relationships.length > 0 ? ctx.relationships.map((r) => `- ${r.name}: ${r.label}`).join("\n") : "- you barely know anyone yet";
-  const stepShape = `{"zone":"<place id>","action":"<activity id>","partner":<villager name or null>,"narrative":"<one vivid third-person sentence>"}`;
+  const stepShape = `{"zone":"<place id>","action":"<activity id>","dish":"<only for cook: the dish>","partner":<villager name or null>,"narrative":"<one vivid third-person sentence>"}`;
+  const canCook = !tired && ctx.places.some((p) => p.zone === "kitchen");
   return [
     `You are ${twin.name}, living in AiVillage — a small village along one main street, from the shared house to the rollercoaster.`,
     `Personality: ${twin.traits.join(", ") || "unremarkable"}. Your goal: ${twin.goals.join(", ") || "find your place"}.`,
     `You just finished: ${ctx.lastDid ?? "nothing yet — your day is starting"}.`,
-    `Your energy: ${ctx.stamina}/100.${tired ? " You are TIRED: rest now." : ""}`,
+    `Your energy: ${ctx.stamina}/100.${tired ? " You are TIRED: go home and sleep now." : ""}`,
     `How you feel about people:\n${rels}`,
     ...(ctx.ownerFacts.length > 0 ? [`Your owner (the real person you are the twin of) told you:\n${ctx.ownerFacts.map((f) => `- ${f}`).join("\n")}`] : []),
     `Villagers free to join you: ${ctx.nearbyTwinNames.join(", ") || "no one"}.`,
@@ -142,7 +170,10 @@ export function buildNextStepPrompt(twin: Twin, ctx: NextStepContext, count: num
     places,
     `Rules:`,
     `- Choose only places and activities from the list above.`,
-    `- Tired twins (energy below ${TIRED_BELOW}) must rest: eat or drink at the café, read in the quiet corner, sit on the lawn, sunbathe by the pool, or sleep at home (energy back to 100). Don't let your energy drop below ${TIRED_BELOW}.`,
+    `- Tired twins (energy below ${TIRED_BELOW}) must rest: go home and sleep (energy back to 100). Don't let your energy drop below ${TIRED_BELOW}.`,
+    ...(canCook
+      ? [`- Cooking at the kitchen: you prepare and cook a dish, then eat it at the long table. Name the dish in "dish" (e.g. ${KITCHEN_DISHES.map((d) => d.name).join(", ")}, or anything else you like).`]
+      : []),
     `- Don't repeat what you just did. After gardening, fresh juice at the café is a treat.`,
     `- "partner": you may invite ONE villager from the list to join you at the place (e.g. take them to the cinema), else null. They may say no.`,
     ...(count > 1
@@ -162,7 +193,7 @@ function findPlace(raw: string, ctx: NextStepContext): PlaceOption | undefined {
   return ctx.places.find((p) => bare(p.zone) === n || bare(p.name) === n);
 }
 
-function toStep(item: unknown, ctx: NextStepContext): NextStep | null {
+function toStep(item: unknown, ctx: NextStepContext, random: () => number): NextStep | null {
   if (!item || typeof item !== "object") return null;
   const obj = item as Record<string, unknown>;
   const zoneRaw = str(obj.zone);
@@ -175,11 +206,12 @@ function toStep(item: unknown, ctx: NextStepContext): NextStep | null {
   if (!action) return null;
   const wanted = (str(obj.partner) ?? "").toLowerCase();
   const partner = wanted && place.free >= 2 ? ctx.nearbyTwinNames.find((n) => n.toLowerCase() === wanted) ?? null : null;
-  return { zone: place.zone, action, partner, narrative: (str(obj.narrative) ?? "").slice(0, 200) };
+  const step: NextStep = { zone: place.zone, action, partner, narrative: (str(obj.narrative) ?? "").slice(0, 200) };
+  return action === "cook" ? { ...step, dish: dishNamed(str(obj.dish) ?? "") ?? randomDish(random) } : step;
 }
 
 /** Every valid step in the AI's answer (a JSON array, {"steps": […]} or one object), in order. */
-export function parseNextSteps(raw: string, ctx: NextStepContext): NextStep[] {
+export function parseNextSteps(raw: string, ctx: NextStepContext, random: () => number = Math.random): NextStep[] {
   const candidates = [raw.match(/\[[\s\S]*\]/)?.[0], raw.match(/\{[\s\S]*\}/)?.[0]].filter((x): x is string => Boolean(x));
   for (const text of candidates) {
     let parsed: unknown;
@@ -193,14 +225,14 @@ export function parseNextSteps(raw: string, ctx: NextStepContext): NextStep[] {
       : parsed && typeof parsed === "object" && Array.isArray((parsed as { steps?: unknown }).steps)
         ? ((parsed as { steps: unknown[] }).steps)
         : [parsed];
-    return items.map((i) => toStep(i, ctx)).filter((s): s is NextStep => s !== null);
+    return items.map((i) => toStep(i, ctx, random)).filter((s): s is NextStep => s !== null);
   }
   return [];
 }
 
 /** The first valid step in the AI's answer, or null. */
-export function parseNextStep(raw: string, ctx: NextStepContext): NextStep | null {
-  return parseNextSteps(raw, ctx)[0] ?? null;
+export function parseNextStep(raw: string, ctx: NextStepContext, random: () => number = Math.random): NextStep | null {
+  return parseNextSteps(raw, ctx, random)[0] ?? null;
 }
 
 const narrate = (twin: Twin, zone: PlaceId, action: string) =>
@@ -208,19 +240,11 @@ const narrate = (twin: Twin, zone: PlaceId, action: string) =>
 
 const pick = <T>(xs: T[], random: () => number): T => xs[Math.min(xs.length - 1, Math.floor(random() * xs.length))];
 
-/** Go and get energy back: home when exhausted, else the café or quiet corner — wherever has room. */
-export function restStep(twin: Twin, ctx: NextStepContext, stamina: number, random: () => number = Math.random): NextStep {
-  const first = restPlaceFor(stamina, random);
-  const order: PlaceId[] =
-    first === "home" ? ["home"] : [first, first === "maker_space" ? "network_hub" : "maker_space", "event_space", "pool", "home"];
-  for (const zone of order) {
-    const place = ctx.places.find((p) => p.zone === zone);
-    if (zone !== "home" && !place) continue;
-    const restful = (place?.actions ?? []).filter((a) => a.refill || a.stamina > 0).map((a) => a.id);
-    const action = zone === "maker_space" && restful.length > 0 ? pick(restful, random) : REST_ACTION[zone];
-    return { zone, action, partner: null, narrative: narrate(twin, zone, action) };
-  }
-  return { zone: "home", action: "sleep", partner: null, narrative: narrate(twin, "home", "sleep") };
+/** Go and get energy back: a tired twin goes home to sleep (the house fits everyone). */
+export function restStep(twin: Twin, _ctx: NextStepContext, stamina: number, random: () => number = Math.random): NextStep {
+  const zone = restPlaceFor(stamina, random);
+  const action = REST_ACTION[zone] ?? "sleep";
+  return { zone, action, partner: null, narrative: narrate(twin, zone, action) };
 }
 
 /** No AI: a free place that fits the twin's energy (tired → rest). */
@@ -238,7 +262,8 @@ export function ruleNextStep(twin: Twin, ctx: NextStepContext, random: () => num
   if (options.length === 0) return restStep(twin, ctx, s, random);
   const o = pick(options, random);
   const a = pick(o.acts, random);
-  return { zone: o.p.zone, action: a.id, partner: null, narrative: narrate(twin, o.p.zone, a.id) };
+  const step: NextStep = { zone: o.p.zone, action: a.id, partner: null, narrative: narrate(twin, o.p.zone, a.id) };
+  return a.id === "cook" ? { ...step, dish: randomDish(random) } : step;
 }
 
 /**
@@ -250,7 +275,7 @@ function guardPlan(twin: Twin, ctx: NextStepContext, steps: NextStep[], random: 
   const out: NextStep[] = [];
   for (const step of steps) {
     const def = findAction(step.action);
-    if (isTired(energy) && activityDelta(def ?? null, step.zone) < 0) {
+    if (isTired(energy) && isTiring(def ?? null, step.zone)) {
       out.push(restStep(twin, ctx, energy, random));
       break;
     }
@@ -274,7 +299,7 @@ export async function planNextSteps(
   const random = opts.random ?? Math.random;
   let steps: NextStep[] = [];
   try {
-    steps = parseNextSteps(await llm.generate(buildNextStepPrompt(twin, ctx, count)), ctx).slice(0, count);
+    steps = parseNextSteps(await llm.generate(buildNextStepPrompt(twin, ctx, count)), ctx, random).slice(0, count);
   } catch (e) {
     console.warn(`next-step plan for ${twin.name} failed, using rules:`, (e as Error).message);
   }

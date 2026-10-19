@@ -1,5 +1,6 @@
 // --- What a twin can DO: a real-life action catalogue + free "mime" actions, under rules ---
 import { placeOf } from "./places.js";
+import type { Dish } from "./dishes.js";
 
 /** Body animations the renderer knows how to play. */
 export const BODY_ANIMS = [
@@ -7,14 +8,16 @@ export const BODY_ANIMS = [
   "laugh", "cry", "think", "wash", "eat", "drink", "read", "phone", "sweep", "water", "exercise",
   "hug", "kiss", "highfive", "handshake",
   // Main Street places
-  "swim", "bike", "run", "lift", "dig", "watch", "ride"
+  "swim", "bike", "run", "lift", "dig", "watch", "ride",
+  // the kitchen and the library
+  "chop", "stir", "type"
 ] as const;
 export type BodyAnim = (typeof BODY_ANIMS)[number];
 
 export type ActionKind = "self" | "social" | "chore";
 
 /** Something the twin holds while doing it (the avatar draws it). */
-export type ActionItem = "juice" | "plate" | "popcorn" | "basket" | "dumbbell";
+export type ActionItem = "juice" | "plate" | "popcorn" | "basket" | "dumbbell" | "book" | "laptop" | "dish";
 
 export interface ActionDef {
   id: string;
@@ -69,6 +72,11 @@ export const ACTIONS: ActionDef[] = [
   a("drink_coffee", "drink coffee", "☕", "self", "drink", 60, { aliases: ["coffee", "drink", "have a coffee", "drink tea"], place: "maker_space" }),
   a("drink_juice", "drink fresh juice", "🧃", "self", "drink", 40, { aliases: ["juice", "make juice", "drink juice", "have a juice"], place: "maker_space", item: "juice" }),
   a("read", "read a book", "📖", "self", "read", 90, { aliases: ["read", "relax", "rest", "sit quietly"], place: "network_hub" }),
+  // the library: read in an armchair, study at a desk
+  a("read_library", "read in the library", "📚", "self", "read", 90, { aliases: ["read in the library", "go to the library", "library", "read at the library"], place: "library", item: "book" }),
+  a("study", "study", "💻", "self", "type", 120, { aliases: ["study", "do homework", "homework", "do my homework", "work on the laptop", "work on my laptop", "work on a laptop", "do some work", "use the laptop"], place: "library", item: "laptop" }),
+  // the kitchen: prepare, cook, carry the plate to the long table and eat (the dish is on the order)
+  a("cook", "cook a meal", "🍳", "self", "chop", 125, { aliases: ["cook", "cook something", "cook a meal", "make a meal", "cook dinner", "cook lunch", "make food", "cook food"], place: "kitchen", item: "dish" }),
   a("phone_call", "make a phone call", "📱", "self", "phone", 10, { aliases: ["call", "phone"] }),
   a("sweep", "sweep the floor", "🧹", "chore", "sweep", 10, { aliases: ["sweep", "clean"] }),
   a("water_plants", "water the plants", "🪴", "chore", "water", 10, { aliases: ["water", "garden"], place: "event_space" }),
@@ -136,6 +144,8 @@ export interface PerformedAction {
   refused?: boolean;
   /** something held while doing it */
   item?: ActionItem;
+  /** "cook": what is being cooked */
+  dish?: Dish;
 }
 
 /** For mimes: pick the closest body animation by keyword. */
@@ -152,6 +162,7 @@ const MIME_ANIMS: [RegExp, BodyAnim][] = [
 export function staminaDelta(action: { id: string; place: string | null }): number {
   if (action.id === "drink_juice" || action.id === "sunbathe") return 10;
   if (action.id === "sleep") return 0; // the house refills instead (applyStamina)
+  if (action.id === "study") return -2; // −1 / 60 s over a 2-minute session; the library's +2 is for reading
   return placeOf(action.place)?.stamina ?? 0;
 }
 

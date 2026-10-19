@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, ACTIONS, MAX_STAMINA, TIRED_BELOW, labelFor, placeOf } from "@aivillage/shared";
+import { DEFAULT_ZONES, ZONE_DISPLAY, ZONE_TAGLINE, ACTIONS, KITCHEN_DISHES, MAX_STAMINA, TIRED_BELOW, findAction, labelFor, placeOf } from "@aivillage/shared";
 import type { Twin, Memory, LlmClient, LlmTool, ToolTurn, TwinCommand, OwnerOrder, PerformedAction } from "@aivillage/shared";
 import type { DB } from "../db/client.js";
 import { getDb } from "../db/appDb.js";
@@ -7,8 +7,8 @@ import { DrizzleTwinRepository } from "../db/twinRepository.js";
 import { DrizzleMemoryRepository } from "../db/memoryRepository.js";
 import { DrizzleRelationshipRepository } from "../db/relationshipRepository.js";
 import { DrizzleChatRepository, type ChatMessage } from "../db/chatRepository.js";
-import { normalizeZone, parseCommand, applyCommand, commandAck } from "./commands.js";
-import { settled, staminaAfter, staminaOf } from "../sim/activity.js";
+import { normalizeZone, parseCommand, applyCommand, commandAck, dishFromWords } from "./commands.js";
+import { dishNamed, orderEnergy, settled, staminaOf } from "../sim/activity.js";
 import { clearQueuedSteps } from "../sim/stepQueue.js";
 
 export { normalizeZone };
@@ -123,9 +123,10 @@ export function buildChatTools(villagerNames: string[]): LlmTool[] {
       name: "do_action",
       description:
         `Do something with your body, right now. Known actions: ${ACTIONS.map((a) => a.id).join(", ")}. ` +
-        "Place activities (swim, sunbathe, work_out, run, ride_bike, watch_movie, ride_coaster, garden, drink_juice, eat, drink_coffee, read, sleep…) walk you to their place first. " +
+        "Place activities (swim, sunbathe, work_out, run, ride_bike, watch_movie, ride_coaster, garden, drink_juice, eat, drink_coffee, read, read_library, study, cook, sleep…) walk you to their place first. " +
+        "cook = go to the kitchen, prepare and cook a dish, then eat it at the long table (pass the dish). read_library / study = read or study at the library. " +
         "For a place activity you can invite a villager along as the target (\"take Sena to the cinema\" = watch_movie with target Sena); they may say no. " +
-        "Tiring activities (gym, pool, bikes, rollercoaster…) use energy; when you are tired you will rest first. " +
+        "Tiring activities (gym, pool, bikes, rollercoaster, studying, cooking…) use energy; when you are tired you will go home and sleep first. " +
         "Social ones (hug, kiss_cheek, high_five, handshake, dance_together) need a target villager, who may refuse if they don't like you. " +
         "For anything else a person can really do (e.g. 'play guitar'), pass a short action text and an emoji — it will be mimed. " +
         "Never: violence, anything sexual (kisses are on the cheek only), flying, teleporting or leaving the village.",
@@ -134,7 +135,8 @@ export function buildChatTools(villagerNames: string[]): LlmTool[] {
         properties: {
           action: { type: "string", description: "an action id from the list, or a short free action" },
           target: { type: "string", enum: villagerNames, description: "the villager to do it with (social actions) or to invite along to a place activity" },
-          emoji: { type: "string", description: "one emoji for a free action" }
+          emoji: { type: "string", description: "one emoji for a free action" },
+          dish: { type: "string", description: `only for cook: the dish to cook, as the owner named it (e.g. ${KITCHEN_DISHES.slice(0, 4).map((d) => d.name).join(", ")}); leave out to pick one yourself` }
         },
         required: ["action"]
       }
@@ -187,7 +189,16 @@ export function parseToolTurn(turn: ToolTurn, villagerNames: string[]): ChatRepl
       case "do_action": {
         const action = str(call.input.action);
         const emoji = str(call.input.emoji);
-        if (action) out.command = { type: "act", action, target: villager(call.input.target), ...(emoji ? { emoji } : {}) };
+        if (!action) break;
+        const target = villager(call.input.target);
+        // the model wrote the whole thing as words ("cook sushi"): read it like the owner's words
+        const words = findAction(action) ? null : parseCommand(action, villagerNames);
+        if (words?.type === "act" && words.action === "cook") {
+          out.command = { ...words, target: target ?? words.target };
+          break;
+        }
+        const dish = findAction(action)?.id === "cook" ? dishNamed(str(call.input.dish) ?? "") : null;
+        out.command = { type: "act", action, target, ...(emoji ? { emoji } : {}), ...(dish ? { dish } : {}) };
         break;
       }
       case "stay_here":
@@ -311,7 +322,12 @@ export async function chatWithTwin(
   }
 
   // Safety net: if the owner clearly gave an order but the model forgot to act, act anyway.
-  const command = parsed.command ?? parseCommand(text, villagerNames);
+  let command = parsed.command ?? parseCommand(text, villagerNames);
+  // the model said "cook" but not what: the owner's own words may name the dish ("cook me a steak")
+  if (command?.type === "act" && findAction(command.action)?.id === "cook" && !command.dish) {
+    const dish = dishFromWords(text, villagerNames);
+    if (dish) command = { ...command, dish };
+  }
 
   let updated = twin;
   if (parsed.goal) {
@@ -365,7 +381,7 @@ export async function chatWithTwin(
     ? `Hmm… ${refusal}.`
     : parsed.reply ||
       (command
-        ? commandAck(twin.name, command)
+        ? commandAck(twin.name, ackFor(command, updated.order))
         : llm
           ? `${twin.name} looks up, distracted by village drama — say that again?`
           : "I need an AI brain to really talk — choose one in ⚙️ Settings. I can still follow simple orders like “go to the café”.");
@@ -422,7 +438,13 @@ async function recordSocialAction(
   }
 }
 
-/** "Take Sena to the cinema": the partner agreed and comes along — same activity, same place. */
+/** The ack names what is really cooking (a dish the twin picked itself, too). */
+function ackFor(command: TwinCommand, order: OwnerOrder | null | undefined): TwinCommand {
+  const dish = order?.action?.dish;
+  return command.type === "act" && dish && !command.dish ? { ...command, dish } : command;
+}
+
+/** "Take Sena to the cinema" / "cook pasta with Sena": the partner agreed and comes along — same activity (same dish), same place. */
 async function bringAlong(
   actor: Twin,
   partner: Twin,
@@ -439,7 +461,7 @@ async function bringAlong(
     locationZone: order.zone,
     order: {
       ...order, auto: true, targetName: actor.name,
-      energyTo: staminaAfter(staminaOf(partner, at), action, order.zone),
+      ...orderEnergy(staminaOf(partner, at), action, order.zone),
       label: `${action.label} with ${actor.name}`,
       action: { ...action, targetName: actor.name, refused: false }
     }

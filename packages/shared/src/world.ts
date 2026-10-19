@@ -48,7 +48,7 @@ export interface WorldState {
 
 /**
  * Canonical zone layout shared by the backend (state building) and the renderer.
- * Main Street map (LAYOUT_VERSION 3: bigger places, moved out from the street): world = tile − 3.5; one winding street
+ * Main Street map (LAYOUT_VERSION 4: + the kitchen and the library): world = tile − 3.5; one winding street
  * from the house (west) to the rollercoaster (east). The first entry is the fallback zone.
  */
 export const DEFAULT_ZONES: WorldZone[] = [
@@ -62,7 +62,9 @@ export const DEFAULT_ZONES: WorldZone[] = [
   { name: "event_space", col: 7, row: 8 },
   { name: "pool", col: 11, row: -5 },
   { name: "cinema", col: 11, row: 12 },
-  { name: "funfair", col: 13, row: 4 }
+  { name: "funfair", col: 13, row: 4 },
+  { name: "kitchen", col: 0, row: -4 },
+  { name: "library", col: -5, row: -6 }
 ];
 
 // Drama-village venue identity: zone ids stay stable (DB, planner), but every
@@ -78,7 +80,9 @@ export const ZONE_DISPLAY: Record<string, string> = {
   pool: "THE POOL",
   cinema: "THE CINEMA",
   funfair: "THE ROLLERCOASTER",
-  bike_rack: "THE BIKES"
+  bike_rack: "THE BIKES",
+  kitchen: "THE KITCHEN",
+  library: "THE LIBRARY"
 };
 
 export const ZONE_TAGLINE: Record<string, string> = {
@@ -92,7 +96,9 @@ export const ZONE_TAGLINE: Record<string, string> = {
   pool: "swim and sunbathe",
   cinema: "movies under the sky",
   funfair: "scream on the drop",
-  bike_rack: "ride along the street"
+  bike_rack: "ride along the street",
+  kitchen: "cook together, eat at the long table",
+  library: "read, study, work on a laptop"
 };
 
 const PALETTE = [0xff9a5b, 0x3ddc97, 0xffd166, 0x5b8cff, 0xc98cff, 0xff6f9c, 0x5be0c8];
@@ -216,7 +222,8 @@ export function toWorldState(input: ToWorldStateInput): WorldState {
 /** What each venue looks like when a twin hangs out there. */
 export const ZONE_EMOJI: Record<string, string> = {
   maker_space: "☕", event_space: "🌸", network_hub: "💭", plaza: "🎤",
-  home: "🏠", garden: "🥕", gym: "🏋️", pool: "🏊", cinema: "🎬", funfair: "🎢", bike_rack: "🚲"
+  home: "🏠", garden: "🥕", gym: "🏋️", pool: "🏊", cinema: "🎬", funfair: "🎢", bike_rack: "🚲",
+  kitchen: "🍳", library: "📚"
 };
 
 /** One-line status for a twin following an owner order (3D label + chat panel). */

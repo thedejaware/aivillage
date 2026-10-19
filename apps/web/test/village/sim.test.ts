@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import type { WorldState, WorldTwinView } from "@aivillage/shared";
+import type { DishLook, WorldState, WorldTwinView } from "@aivillage/shared";
 import { DEFAULT_ZONES, DEFAULT_APPEARANCE, LAYOUT_VERSION } from "@aivillage/shared";
 import { VillageSim, avatarPose, bodyLift, WALK_SPEED } from "../../lib/village/sim";
 import {
   tileToWorld, zoneCenter, spotsFor, SPOTS, POOL, BIKE_ROUTE, COASTER_DROP, COASTER_QUEUE,
-  COASTER_RIDE_SECONDS, coasterPose, type Pt
+  COASTER_RIDE_SECONDS, KITCHEN, coasterPose, type Pt
 } from "../../lib/village/layout";
 import { SEAT_Y } from "../../components/village/scenery";
 
@@ -712,5 +712,250 @@ describe("Main Street: together", () => {
     const t = runUntil(sim, 0, () => memo.anim === "watch" && sena.anim === "watch" && sena.route.length === 0, 60);
     expect(dist(memo, sena)).toBeLessThan(0.7);
     expect(avatarPose(sena, t).item).toBe("popcorn");
+  });
+});
+
+// ---------------- the kitchen and the library ----------------
+
+describe("the kitchen: prep → cook → carry → eat", () => {
+  const cook = (dish: { name: string; look: DishLook } | null, extra: Partial<Act> = {}, issuedAt = "2026-10-19T12:00:00Z", auto = true) =>
+    placeAct("cook", "chop", "kitchen", 125, { item: "dish", ...(dish ? { dish } : {}), ...extra }, issuedAt, auto);
+  const seats = () => spotsFor("kitchen").filter((s) => s.kind === "table");
+  const kc = () => zoneCenter("kitchen");
+  /** inside a furniture box (relative to the kitchen's centre), with a small margin */
+  const inside = (p: Pt, box: { x: number; z: number; w: number; d: number }, m = 0.05) =>
+    Math.abs(p.x - kc().x - box.x) < box.w / 2 - m && Math.abs(p.z - kc().z - box.z) < box.d / 2 - m;
+
+  it("chops at a counter, stirs at the same station's stove, carries the plate to a seat and eats there — on the dish's clock", () => {
+    const onOrderArrive = vi.fn();
+    const sim = new VillageSim({ random: seeded(), onOrderArrive });
+    sim.reconcile(world(at("memo", "kitchen")), 0);
+    sim.reconcile(world(at("memo", "kitchen", cook({ name: "pasta", look: "pasta" }))), 0);
+    const memo = sim.twins.get("memo")!;
+    const t0 = runUntil(sim, 0, () => memo.anim === "chop", 30);
+    expect(memo.anim).toBe("chop");
+    expect(onOrderArrive).toHaveBeenCalledTimes(1);
+    const counter = spotOf(sim, "memo")!;
+    expect(counter.kind).toBe("counter");
+    const i = Number(counter.id.split("-")[1]);
+    expect(memo.yaw).toBeCloseTo(counter.yaw, 5); // facing the island
+    expect(avatarPose(memo, t0)).toMatchObject({ anim: "chop", seated: false, item: null });
+    expect(bodyLift(memo)).toBeCloseTo(SEAT_Y.counter, 5);
+    // the whole station and a seat are claimed up front
+    expect(sim.spots.filter((s) => s.busyBy === "memo").map((s) => s.kind).sort()).toEqual(["counter", "stove", "table"]);
+    expect(sim.spots.find((s) => s.id === `stove-${i}`)!.busyBy).toBe("memo");
+    expect(sim.kitchenState().counters[i]).toBe("pasta");
+    expect(sim.kitchenState().stoves.every((l) => l === null)).toBe(true);
+
+    let t = run(sim, t0, 24);
+    expect(memo.anim).toBe("chop");
+    // prep ends after 25 s: walk round the island to the stove behind it (never through the island)
+    for (let k = 0; k < 200 && memo.anim !== "stir"; k++) {
+      t = run(sim, t, 0.05);
+      expect(inside(memo, KITCHEN.island), `in the island at ${t.toFixed(2)}`).toBe(false);
+    }
+    expect(memo.anim).toBe("stir");
+    expect(t).toBeGreaterThan(t0 + 25 - 0.1);
+    expect(spotOf(sim, "memo")?.id).toBe(`stove-${i}`);
+    expect(sim.spots.find((s) => s.id === `counter-${i}`)!.busyBy).toBeNull();
+    expect(sim.kitchenState().counters[i]).toBeNull();
+    expect(sim.kitchenState().stoves[i]).toBe("pasta");
+    expect(avatarPose(memo, t).item).toBeNull();
+
+    // cooking ends 60 s in (prep 25 + cook 35): carry the plate
+    t = run(sim, t, t0 + 59 - t);
+    expect(memo.anim).toBe("stir");
+    t = runUntil(sim, t, () => memo.route.length > 0, 3);
+    expect(t).toBeGreaterThan(t0 + 60 - 0.1);
+    expect(avatarPose(memo, t)).toMatchObject({ walking: true, item: "dish", dish: "pasta" });
+    expect(sim.spots.find((s) => s.id === `stove-${i}`)!.busyBy).toBeNull();
+    expect(sim.kitchenState().stoves[i]).toBeNull();
+    for (let k = 0; k < 400 && memo.anim !== "eat"; k++) {
+      t = run(sim, t, 0.05);
+      expect(inside(memo, KITCHEN.island), `in the island at ${t.toFixed(2)}`).toBe(false);
+      expect(inside(memo, KITCHEN.table), `on the table at ${t.toFixed(2)}`).toBe(false);
+    }
+    expect(memo.anim).toBe("eat");
+    const seat = spotOf(sim, "memo")!;
+    expect(seat.kind).toBe("table");
+    expect(avatarPose(memo, t)).toMatchObject({ anim: "eat", seated: true, item: "dish", dish: "pasta", walking: false });
+    expect(bodyLift(memo)).toBeCloseTo(SEAT_Y.table - 0.25, 5);
+    const k = seats().findIndex((s) => s.id === seat.id);
+    expect(sim.kitchenState().seats[k]).toBe("pasta");
+    expect(sim.kitchenState().seats.filter((l) => l !== null)).toHaveLength(1);
+
+    // eating ends 125 s in; then every spot is free again
+    t = run(sim, t, t0 + 124 - t);
+    expect(memo.anim).toBe("eat");
+    t = run(sim, t, 2);
+    expect(memo.anim).not.toBe("eat");
+    expect(memo.task).toBeNull();
+    expect(avatarPose(memo, t).item).toBeNull();
+    expect(sim.spots.filter((s) => s.busyBy === "memo")).toHaveLength(0);
+    expect(sim.kitchenState().seats.every((l) => l === null)).toBe(true);
+    // stands up away from the table, not onto it
+    run(sim, t, 3);
+    expect(inside(memo, KITCHEN.table)).toBe(false);
+  });
+
+  it("a drink skips the stove: blend at the counter for 20 s, then drink at the table", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "kitchen")), 0);
+    sim.reconcile(world(at("memo", "kitchen", cook({ name: "orange juice", look: "drink" }))), 0);
+    const memo = sim.twins.get("memo")!;
+    const t0 = runUntil(sim, 0, () => memo.anim === "chop", 30);
+    expect(sim.spots.filter((s) => s.busyBy === "memo").map((s) => s.kind).sort()).toEqual(["counter", "table"]);
+    let t = t0;
+    const anims = new Set<string>();
+    for (let k = 0; k < 1200 && memo.anim !== "eat"; k++) {
+      t = run(sim, t, 0.05);
+      anims.add(memo.anim);
+      expect(sim.spots.some((s) => s.kind === "stove" && s.busyBy === "memo")).toBe(false);
+    }
+    expect(anims.has("stir")).toBe(false);
+    expect(memo.anim).toBe("eat");
+    expect(t).toBeGreaterThan(t0 + 20 - 0.1);
+    expect(t).toBeLessThan(t0 + 35);
+    expect(avatarPose(memo, t)).toMatchObject({ item: "dish", dish: "drink", seated: true });
+    // 20 + 5 + 40 = 65 s in all
+    t = run(sim, t, t0 + 64 - t);
+    expect(memo.anim).toBe("eat");
+    run(sim, t, 2);
+    expect(memo.task).toBeNull();
+  });
+
+  it("no dish on the order: cooks a plain plate", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "kitchen")), 0);
+    sim.reconcile(world(at("memo", "kitchen", cook(null))), 0);
+    const memo = sim.twins.get("memo")!;
+    runUntil(sim, 0, () => memo.anim === "chop", 30);
+    expect(sim.kitchenState().counters.filter((l) => l !== null)).toEqual(["plate"]);
+  });
+
+  it("4 stations: a 5th cook waits off the stations, then takes one when it frees up", () => {
+    const sim = new VillageSim({ random: seeded() });
+    const ids = ["c1", "c2", "c3", "c4", "c5"];
+    sim.reconcile(world(...ids.map((id) => at(id, "kitchen"))), 0);
+    sim.reconcile(world(...ids.map((id) => at(id, "kitchen", cook({ name: "steak", look: "steak" })))), 0);
+    const cooks = () => [...sim.twins.values()].filter((tw) => tw.anim === "chop");
+    let t = runUntil(sim, 0, () => cooks().length === 4, 30);
+    expect(cooks()).toHaveLength(4);
+    const waiting = [...sim.twins.values()].find((tw) => tw.anim !== "chop")!;
+    run(sim, t, 1);
+    t += 1;
+    expect(waiting.task?.phase).toBe("wait");
+    expect(sim.spots.some((s) => s.busyBy === waiting.id)).toBe(false);
+    expect(sim.kitchenState().counters.every((l) => l === "steak")).toBe(true);
+    // a station frees once its cook leaves the stove (60 s): the waiting twin takes it — nobody shares a spot
+    for (let k = 0; k < 900 && waiting.anim !== "chop"; k++) {
+      t = run(sim, t, 0.1);
+      const held = sim.spots.filter((s) => s.busyBy).map((s) => `${s.busyBy}:${s.kind}`);
+      expect(new Set(held).size).toBe(held.length);
+      const owners = sim.spots.filter((s) => s.busyBy).map((s) => s.id);
+      expect(new Set(owners).size).toBe(owners.length);
+    }
+    expect(waiting.anim).toBe("chop");
+    expect(spotOf(sim, waiting.id)?.kind).toBe("counter");
+  });
+
+  it("'cook pasta with Sena': neighbouring stations, then seats across the table from each other", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "kitchen"), at("sena", "network_hub")), 0);
+    sim.reconcile(world(
+      at("memo", "kitchen", cook({ name: "pasta", look: "pasta" }, { targetName: "Sena" }, "2026-10-19T12:00:00Z", false)),
+      at("sena", "network_hub")
+    ), 0);
+    const memo = sim.twins.get("memo")!;
+    const sena = sim.twins.get("sena")!;
+    let t = runUntil(sim, 0, () => memo.anim === "chop" && sena.anim === "chop", 60);
+    const a = Number(spotOf(sim, "memo")!.id.split("-")[1]);
+    const b = Number(spotOf(sim, "sena")!.id.split("-")[1]);
+    expect(Math.abs(a - b)).toBe(1);
+    expect(sim.kitchenState().counters.filter((l) => l === "pasta")).toHaveLength(2);
+    t = runUntil(sim, t, () => memo.anim === "eat" && sena.anim === "eat" && memo.route.length === 0 && sena.route.length === 0, 140);
+    const sa = spotOf(sim, "memo")!;
+    const sb = spotOf(sim, "sena")!;
+    expect(sa.kind).toBe("table");
+    expect(sb.kind).toBe("table");
+    expect(sa.id.slice(0, -1)).toBe(sb.id.slice(0, -1)); // table-1a / table-1b: across from each other
+    expect(sa.id).not.toBe(sb.id);
+    expect(avatarPose(sena, t)).toMatchObject({ item: "dish", dish: "pasta" });
+  });
+
+  it("walking inside the kitchen never cuts through the island or the table (a second meal, a cook stopped at the stove)", () => {
+    for (const [first, look] of [["table", "pasta"], ["table", "drink"], ["stove", "steak"]] as const) {
+      for (const seed of [1, 2, 3, 4, 5, 6]) {
+        const sim = new VillageSim({ random: seeded(seed) });
+        const ids = ["k1", "k2", "k3", "k4"];
+        sim.reconcile(world(...ids.map((id) => at(id, "kitchen"))), 0);
+        sim.reconcile(world(...ids.map((id) => at(id, "kitchen", cook({ name: look, look })))), 0);
+        let t = runUntil(sim, 0, () => ids.every((id) => sim.twins.get(id)!.anim === (first === "table" ? "eat" : "stir")), 140);
+        if (first === "table") t = runUntil(sim, t, () => ids.every((id) => sim.twins.get(id)!.task === null), 140);
+        t = run(sim, t, 2);
+        sim.reconcile(world(...ids.map((id) => at(id, "kitchen", cook({ name: look, look }, {}, "2026-10-19T12:30:00Z")))), t);
+        for (let k = 0; k < 1600 && !ids.every((id) => sim.twins.get(id)!.anim === "eat"); k++) {
+          t = run(sim, t, 0.05);
+          for (const id of ids) {
+            const tw = sim.twins.get(id)!;
+            if (tw.route.length === 0) continue;
+            expect(inside(tw, KITCHEN.island), `${first}/${look}/${seed}: ${id} in the island at ${t.toFixed(2)}`).toBe(false);
+            expect(inside(tw, KITCHEN.table), `${first}/${look}/${seed}: ${id} on the table at ${t.toFixed(2)}`).toBe(false);
+          }
+        }
+        expect(ids.every((id) => sim.twins.get(id)!.anim === "eat"), `${first}/${look}/${seed}`).toBe(true);
+      }
+    }
+  });
+
+  it("a new order mid-meal frees the whole station and the seat", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "kitchen")), 0);
+    sim.reconcile(world(at("memo", "kitchen", cook({ name: "burger", look: "burger" }))), 0);
+    const memo = sim.twins.get("memo")!;
+    const t = runUntil(sim, 0, () => memo.anim === "chop", 30);
+    sim.reconcile(world(at("memo", "kitchen")), t);
+    expect(sim.spots.filter((s) => s.busyBy === "memo")).toHaveLength(0);
+    expect(sim.kitchenState().counters.every((l) => l === null)).toBe(true);
+  });
+});
+
+describe("the library", () => {
+  it("read in the library: an armchair, seated, reading a book", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "network_hub")), 0);
+    sim.reconcile(world(at("memo", "library", placeAct("read_library", "read", "library", 90, { item: "book" }))), 0);
+    const memo = sim.twins.get("memo")!;
+    const t = runUntil(sim, 0, () => memo.anim === "read" && memo.route.length === 0, 60);
+    expect(spotOf(sim, "memo")?.kind).toBe("armchair");
+    expect(avatarPose(memo, t)).toMatchObject({ anim: "read", seated: true, item: "book" });
+    expect(bodyLift(memo)).toBeCloseTo(SEAT_Y.armchair - 0.25, 5);
+  });
+
+  it("study: a desk seat, seated, typing on a laptop", () => {
+    const sim = new VillageSim({ random: seeded() });
+    sim.reconcile(world(at("memo", "network_hub")), 0);
+    sim.reconcile(world(at("memo", "library", placeAct("study", "type", "library", 120, { item: "laptop" }))), 0);
+    const memo = sim.twins.get("memo")!;
+    const t = runUntil(sim, 0, () => memo.anim === "type" && memo.route.length === 0, 60);
+    const desk = spotOf(sim, "memo")!;
+    expect(desk.kind).toBe("desk");
+    expect(memo.yaw).toBeCloseTo(desk.yaw, 5);
+    expect(avatarPose(memo, t)).toMatchObject({ anim: "type", seated: true, item: "laptop" });
+    expect(bodyLift(memo)).toBeCloseTo(SEAT_Y.desk - 0.25, 5);
+  });
+
+  it("8 readers and students fill 4 armchairs and 4 desks, never sharing one", () => {
+    const sim = new VillageSim({ random: seeded() });
+    const ids = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"];
+    sim.reconcile(world(...ids.map((id) => at(id, "library"))), 0);
+    sim.reconcile(world(...ids.map((id, i) => at(id, "library", i % 2
+      ? placeAct("study", "type", "library", 120, { item: "laptop" })
+      : placeAct("read_library", "read", "library", 90, { item: "book" })))), 0);
+    runUntil(sim, 0, () => [...sim.twins.values()].every((tw) => tw.task?.phase === "do"), 60);
+    const held = sim.spots.filter((s) => s.zone === "library" && s.busyBy);
+    expect(held).toHaveLength(8);
+    expect(held.filter((s) => s.kind === "armchair")).toHaveLength(4);
+    expect(held.filter((s) => s.kind === "desk")).toHaveLength(4);
   });
 });

@@ -5,6 +5,7 @@
  * off-screen, so animated props stop doing work there too.
  */
 import * as THREE from "three";
+import type { DishLook } from "@aivillage/shared";
 
 const frustum = new THREE.Frustum();
 const viewProj = new THREE.Matrix4();
@@ -27,4 +28,9 @@ export interface PlacesSim {
   bikesInUse?: () => number;
   sleepingCount?: () => number;
   spots?: { id: string; busyBy: string | null }[];
+  /**
+   * The kitchen's food: counters/stoves by station, seats in table-seat order
+   * (table-0a, table-0b, table-1a, …); a look = someone preps / cooks / eats it there.
+   */
+  kitchenState?: () => { counters: (DishLook | null)[]; stoves: (DishLook | null)[]; seats: (DishLook | null)[] };
 }

@@ -13,14 +13,19 @@
  * in the pool, a gym station, a cinema seat, a bike from the rack, the
  * rollercoaster queue, the house door (then the twin is hidden while it sleeps).
  * A full place makes the twin wait nearby; nobody stacks on one spot.
+ *
+ * The kitchen is a sequence, not one spot: a cook claims a whole station
+ * (counter i + the stove behind it) and a seat at the long table, then
+ * preps at the counter, cooks at the stove, carries the plate to the seat
+ * and eats there — on the dish's clock (`kitchenSteps`), from arrival.
  */
 import {
-  orderStatus, DEFAULT_ZONES, LAYOUT_VERSION,
-  type ActionItem, type BodyAnim, type PerformedAction, type TwinPose, type WorldState, type WorldTwinView
+  orderStatus, DEFAULT_ZONES, LAYOUT_VERSION, dishLookFor, isDrinkLook, kitchenSteps,
+  type ActionItem, type BodyAnim, type DishLook, type KitchenStep, type PerformedAction, type TwinPose, type WorldState, type WorldTwinView
 } from "@aivillage/shared";
 import {
   findRoute, tileToWorld, zoneCenter, SPOTS, ISLAND_HALF, NODES, EDGES, POOL, BIKE_ROUTE, COASTER_EXITS,
-  COASTER_DROP, COASTER_QUEUE, COASTER_RIDE_SECONDS, COASTER_SEATS, coasterPose,
+  COASTER_DROP, COASTER_QUEUE, COASTER_RIDE_SECONDS, COASTER_SEATS, KITCHEN, coasterPose,
   type Pt, type SpotDef, type ActivityKind
 } from "./layout";
 import { PAD_RADIUS, SEAT_Y } from "../../components/village/scenery";
@@ -66,25 +71,34 @@ const ACTIVITY_EMOJI: Record<ActivityKind, string[]> = {
   cinema: ["🍿", "😂", "😮"],
   plot: ["🥕", "🌱", "🧺"],
   coaster: ["🎢"],
-  bike: ["🚲"]
+  bike: ["🚲"],
+  counter: ["🔪", "🥕", "🧅"],
+  stove: ["🍳", "♨️", "🔥"],
+  table: ["😋", "🍽️", "😊"],
+  armchair: ["📖", "😌", "💭"],
+  desk: ["💻", "✍️", "🤓"]
 };
 /** Ambient (idle-life) visit lengths. */
 const ACTIVITY_DURATION: Record<ActivityKind, [number, number]> = {
   coffee: [10, 18], bench: [9, 16], blanket: [10, 18], stage: [6, 11], bed: [20, 30],
   treadmill: [10, 16], weights: [10, 16], swim: [12, 20], lounger: [10, 18], cinema: [15, 25],
-  plot: [10, 16], coaster: [10, 16], bike: [10, 16]
+  plot: [10, 16], coaster: [10, 16], bike: [10, 16],
+  counter: [10, 16], stove: [10, 16], table: [10, 18], armchair: [12, 20], desk: [12, 20]
 };
 /** The body animation for each kind of spot. */
 const ACTIVITY_ANIM: Record<ActivityKind, BodyAnim> = {
   coffee: "drink", bench: "sit", blanket: "sit", stage: "dance", bed: "sleep", treadmill: "run",
-  weights: "lift", swim: "swim", lounger: "sit", cinema: "watch", plot: "dig", coaster: "ride", bike: "bike"
+  weights: "lift", swim: "swim", lounger: "sit", cinema: "watch", plot: "dig", coaster: "ride", bike: "bike",
+  counter: "chop", stove: "stir", table: "sit", armchair: "read", desk: "type"
 };
 /** Spots free-roaming twins use by themselves (rest, never exercise). */
 const RESTFUL_KINDS = new Set<ActivityKind>(["coffee", "bench", "blanket", "lounger"]);
 /** Spots a plain "go to X" order sits the twin at. */
-const GO_KINDS = new Set<ActivityKind>(["coffee", "bench", "blanket", "lounger", "cinema", "stage"]);
+const GO_KINDS = new Set<ActivityKind>(["coffee", "bench", "blanket", "lounger", "cinema", "stage", "armchair", "desk"]);
 /** Seats: the avatar's legs sit (hips on the seat top) whatever the upper body plays. */
-const SEAT_KINDS = new Set<ActivityKind>(["coffee", "bench", "cinema", "lounger", "blanket"]);
+const SEAT_KINDS = new Set<ActivityKind>(["coffee", "bench", "cinema", "lounger", "blanket", "table", "armchair", "desk"]);
+/** Seats at furniture: standing up steps back from it (not toward the street, which may be through it). */
+const STEP_BACK_KINDS = new Set<ActivityKind>(["table", "armchair", "desk"]);
 /** Anims that sit down (hips at seat height). */
 const SEATED_ANIMS = new Set<BodyAnim>(["sit", "watch", "ride"]);
 /** The avatar's "sit" on bare ground drops the body by this. */
@@ -94,11 +108,13 @@ const GROUND_SIT_DROP = 0.22;
 const ACTION_KIND: Record<string, ActivityKind> = {
   swim: "swim", sunbathe: "lounger", run: "treadmill", work_out: "weights", watch_movie: "cinema",
   garden: "plot", drink_coffee: "coffee", drink_juice: "coffee", eat: "coffee", read: "bench",
-  ride_bike: "bike", ride_coaster: "coaster", sleep: "bed", sing: "stage"
+  ride_bike: "bike", ride_coaster: "coaster", sleep: "bed", sing: "stage",
+  cook: "counter", read_library: "armchair", study: "desk"
 };
 /** "sit" sent by the AI to a place: where it sits there. */
 const SIT_KIND: Record<string, ActivityKind> = {
-  event_space: "blanket", network_hub: "bench", maker_space: "coffee", pool: "lounger", cinema: "cinema"
+  event_space: "blanket", network_hub: "bench", maker_space: "coffee", pool: "lounger", cinema: "cinema",
+  library: "armchair", kitchen: "table"
 };
 /** What the partner does back (a cheek kiss gets a happy laugh, not a kiss). */
 const RECIPROCAL: Partial<Record<BodyAnim, BodyAnim>> = { kiss: "laugh" };
@@ -133,8 +149,23 @@ type Order = WorldTwinView["order"];
  *  swim  — lengths along a pool lane
  *  bike  — riding the bike route; park — riding back into the rack
  *  sleep — inside the house (hidden)
+ *  kitchen — at a kitchen spot doing the current meal step (see `KitchenTask.step`)
  */
-export type TaskPhase = "wait" | "go" | "queue" | "ride" | "do" | "swim" | "bike" | "park" | "sleep";
+export type TaskPhase = "wait" | "go" | "queue" | "ride" | "do" | "swim" | "bike" | "park" | "sleep" | "kitchen";
+
+/** One meal in the kitchen: the station + seat it holds and where it is in its steps. */
+export interface KitchenTask {
+  look: DishLook;
+  station: number;
+  counter: SpotState;
+  /** null for drinks (they skip the stove) */
+  stove: SpotState | null;
+  seat: SpotState;
+  /** each step and when it ends (sim seconds); empty until the cook reaches the counter */
+  plan: { step: KitchenStep; end: number }[];
+  /** the step the cook is on (walking to its spot, or doing it); "carry" = walking to the seat with the plate */
+  step: KitchenStep;
+}
 
 export interface PlaceTask {
   action: PerformedAction;
@@ -163,6 +194,8 @@ export interface PlaceTask {
   queuedAt: number;
   seat: number;
   rideY: number;
+  /** the kitchen's meal (cook only) */
+  kitchen: KitchenTask | null;
 }
 
 export interface SimTwin {
@@ -290,7 +323,9 @@ export function bodyLift(tw: SimTwin): number {
 
 /** The spot kind the twin is at right now (an ambient visit or a place activity). */
 function spotKind(tw: SimTwin): ActivityKind | null {
-  return tw.activity?.spot.kind ?? (tw.task?.phase === "do" ? tw.task.kind : null);
+  if (tw.activity) return tw.activity.spot.kind;
+  const t = tw.task;
+  return t && (t.phase === "do" || t.phase === "kitchen") ? t.spot?.kind ?? t.kind : null;
 }
 
 /** Legs sit (seat, blanket, coaster cart); the upper body still plays the anim. */
@@ -306,11 +341,67 @@ export function isRiding(tw: SimTwin): boolean {
   return tw.task?.phase === "ride";
 }
 
-/** What the avatar renderer needs each frame. */
-export function avatarPose(tw: SimTwin, now: number) {
+/**
+ * A walk to a kitchen spot that never cuts through the prep island or the
+ * long table: from outside, come in along the road to the aisle north of
+ * the table; behind the island (at a stove), go round its nearer end; from
+ * beside the table, step out to the aisle first; reach a seat from the aisle.
+ */
+export function kitchenPath(from: Pt, to: SpotDef): Pt[] {
+  const c = zoneCenter("kitchen");
+  const front = c.z + KITCHEN.prepZ; // where cooks stand to prep, in front of the island
+  const back = c.z + KITCHEN.stoveZ; // the gap between the island and the range
+  const aisle = c.z + KITCHEN.table.z - KITCHEN.table.d / 2 - 0.15; // just north of the table's end
+  const end = (x: number) => c.x + (x < c.x ? -1 : 1) * (KITCHEN.island.w / 2 + 0.25);
+  const behind = (p: Pt) => p.z < c.z + KITCHEN.island.z;
+  const out: Pt[] = [];
+  let cur = from;
+  if (Math.hypot(from.x - c.x, from.z - c.z) > (PAD_RADIUS.kitchen ?? 2.3) + 0.5) {
+    cur = { x: c.x, z: aisle };
+    out.push(...findRoute(from, cur));
+  }
+  if (behind(to)) {
+    if (!behind(cur)) {
+      if (cur.z > aisle + 0.05) out.push({ x: cur.x, z: aisle });
+      const ex = end(to.x);
+      out.push({ x: ex, z: front }, { x: ex, z: back });
+    }
+  } else {
+    if (behind(cur)) {
+      const ex = end(cur.x);
+      out.push({ x: ex, z: back }, { x: ex, z: front });
+    } else if (cur.z > aisle + 0.05) out.push({ x: cur.x, z: aisle });
+    if (to.kind === "table") out.push({ x: to.x, z: aisle });
+  }
+  out.push({ x: to.x, z: to.z });
+  return out;
+}
+
+/** The look of a dish on an order; nothing (or nothing known) named → a plain plate. */
+function dishLookOf(action: PerformedAction | null | undefined): DishLook {
+  const d = action?.dish;
+  if (!d) return "plate";
+  return KNOWN_LOOKS.has(d.look) ? d.look : dishLookFor(d.name ?? "");
+}
+const KNOWN_LOOKS = new Set<string>(["burger", "chicken", "steak", "pasta", "dessert", "salad", "drink", "plate"]);
+
+/** What the twin holds: the action's item while doing it; a cook only holds its plate (carry + eat). */
+function heldItem(tw: SimTwin): { item: ActionItem | null; dish: DishLook | null } {
   const t = tw.task;
+  if (t?.kitchen) {
+    const k = t.kitchen;
+    const plate = k.step === "carry" || (k.step === "eat" && t.phase === "kitchen");
+    return plate ? { item: "dish", dish: k.look } : { item: null, dish: null };
+  }
   const doing = t !== null && t.phase !== "wait" && t.phase !== "go" && t.phase !== "queue";
   const item: ActionItem | null = doing ? t.action.item ?? null : tw.perform ? tw.order?.action?.item ?? null : null;
+  const action = doing ? t.action : tw.order?.action;
+  return { item, dish: item === "dish" ? dishLookOf(action) : null };
+}
+
+/** What the avatar renderer needs each frame. */
+export function avatarPose(tw: SimTwin, now: number) {
+  const { item, dish } = heldItem(tw);
   return {
     anim: tw.anim,
     animTime: Math.max(0, now - tw.animStart),
@@ -318,7 +409,8 @@ export function avatarPose(tw: SimTwin, now: number) {
     walkPhase: tw.walkPhase,
     speed: tw.speedMul,
     seated: isSeated(tw),
-    item
+    item,
+    dish
   };
 }
 
@@ -327,6 +419,8 @@ export class VillageSim {
   readonly spots: SpotState[] = SPOTS.map((s) => ({ ...s, busyBy: null }));
   /** the rollercoaster cart: track fraction, whether it moves, who sits in it (seat order) */
   readonly coaster: { t: number; running: boolean; riders: string[] } = { t: 0, running: false, riders: [] };
+  /** the long kitchen table's seats, in layout order (kitchenState's seat index) */
+  private readonly tableSeats: SpotState[] = this.spots.filter((s) => s.zone === "kitchen" && s.kind === "table");
   /** twin whose line is on the TV caption bar — it doesn't start side chats */
   speakingId: string | null = null;
   /** sim time of the last step (seconds) — the renderer's clock for animTime */
@@ -349,6 +443,30 @@ export class VillageSim {
     let n = 0;
     for (const tw of this.twins.values()) if (tw.task?.kind === "bike" && (tw.task.phase === "bike" || tw.task.phase === "park")) n++;
     return n;
+  }
+
+  /**
+   * What the kitchen shows: the dish on each counter's board (prepping), in
+   * each stove's pan (cooking) and on each table seat's plate (eating).
+   * Counters/stoves are indexed by station; seats in `spotsFor("kitchen")`
+   * order of the table seats (table-0a, table-0b, table-1a, …).
+   */
+  kitchenState(): { counters: (DishLook | null)[]; stoves: (DishLook | null)[]; seats: (DishLook | null)[] } {
+    const counters: (DishLook | null)[] = KITCHEN.stations.map(() => null);
+    const stoves: (DishLook | null)[] = KITCHEN.stations.map(() => null);
+    const seats: (DishLook | null)[] = this.tableSeats.map(() => null);
+    for (const tw of this.twins.values()) {
+      const t = tw.task;
+      const k = t?.kitchen;
+      if (!t || !k || t.phase !== "kitchen") continue;
+      if (k.step === "prep") counters[k.station] = k.look;
+      else if (k.step === "cook") stoves[k.station] = k.look;
+      else if (k.step === "eat") {
+        const i = this.tableSeats.indexOf(k.seat);
+        if (i >= 0) seats[i] = k.look;
+      }
+    }
+    return { counters, stoves, seats };
   }
 
   /** Twins asleep inside the house. */
@@ -605,7 +723,7 @@ export class VillageSim {
     tw.task = {
       action, zone, kind, spot: null, phase: "wait", until: 0, retryAt: 0, guest,
       partnerId: withPartner?.id ?? null, emojiAt: 0, emojiUntil: 0, dir: -1,
-      idx: 0, px: tw.x, pz: tw.z, lane: 0, turned: false, queuedAt: 0, seat: 0, rideY: 0
+      idx: 0, px: tw.x, pz: tw.z, lane: 0, turned: false, queuedAt: 0, seat: 0, rideY: 0, kitchen: null
     };
     tw.hidden = false;
     // bring the partner along unless its owner has it busy
@@ -623,6 +741,16 @@ export class VillageSim {
   /** Claim a free spot and walk there, or walk to the waiting point. */
   private claimOrWait(tw: SimTwin, now: number): void {
     const task = tw.task!;
+    if (task.kind === "counter") {
+      if (this.claimKitchen(tw)) {
+        task.phase = "go";
+        tw.bubble = null;
+        this.walkKitchen(tw, task.spot!);
+        return;
+      }
+      this.waitForSpot(tw, now);
+      return;
+    }
     const spot = this.freeSpotFor(tw);
     if (spot) {
       if (task.kind !== "bed") spot.busyBy = tw.id;
@@ -633,6 +761,12 @@ export class VillageSim {
       if (tw.route.length === 0) this.arriveTask(tw, now);
       return;
     }
+    this.waitForSpot(tw, now);
+  }
+
+  /** The place is full: stand at its waiting point and look again soon. */
+  private waitForSpot(tw: SimTwin, now: number): void {
+    const task = tw.task!;
     task.phase = "wait";
     task.retryAt = now + RETRY_S;
     const w = waitPoint(task.zone, tw.id);
@@ -669,6 +803,102 @@ export class VillageSim {
     return free[0];
   }
 
+  // ---------------- the kitchen ----------------
+
+  /**
+   * Claim a whole station (counter i + stove i; a drink needs only the
+   * counter) and a table seat — next to the partner's when cooking together.
+   */
+  private claimKitchen(tw: SimTwin): boolean {
+    const task = tw.task!;
+    const look = dishLookOf(task.action);
+    const drink = isDrinkLook(look);
+    const free = (s: SpotState | undefined) => !!s && (s.busyBy === null || s.busyBy === tw.id);
+    const counters = this.spots.filter((s) => s.zone === "kitchen" && s.kind === "counter");
+    const stoves = this.spots.filter((s) => s.zone === "kitchen" && s.kind === "stove");
+    const stations = counters.map((_, i) => i).filter((i) => free(counters[i]) && (drink || free(stoves[i])));
+    const seats = this.tableSeats.filter((s) => free(s));
+    if (stations.length === 0 || seats.length === 0) return false;
+
+    const partner = task.partnerId ? this.twins.get(task.partnerId) : undefined;
+    const theirs = partner?.task?.kitchen ?? null;
+    let station = stations[0];
+    let seat = seats[0];
+    if (theirs) {
+      // the neighbouring station; the seat across the table (or beside it)
+      station = [...stations].sort((a, b) => Math.abs(a - theirs.station) - Math.abs(b - theirs.station))[0];
+      const across = theirs.seat.id.slice(0, -1);
+      seat = [...seats].sort((a, b) => this.seatRank(a, theirs.seat, across) - this.seatRank(b, theirs.seat, across))[0];
+    } else if (partner) {
+      // leave room for the partner: a free station beside ours, a free seat across
+      station = stations.find((i) => stations.includes(i + 1) || stations.includes(i - 1)) ?? station;
+      seat = seats.find((s) => seats.some((o) => o !== s && o.id.slice(0, -1) === s.id.slice(0, -1))) ?? seat;
+    }
+    const counter = counters[station];
+    const stove = drink ? null : stoves[station];
+    counter.busyBy = tw.id;
+    if (stove) stove.busyBy = tw.id;
+    seat.busyBy = tw.id;
+    task.spot = counter;
+    task.kitchen = { look, station, counter, stove, seat, plan: [], step: "prep" };
+    return true;
+  }
+
+  private seatRank(s: SpotState, theirs: SpotState, across: string): number {
+    return (s.id.slice(0, -1) === across ? 0 : 10) + Math.hypot(s.x - theirs.x, s.z - theirs.z);
+  }
+
+  /** Reached a kitchen spot: start the step that belongs there. */
+  private arriveKitchen(tw: SimTwin, now: number): void {
+    const task = tw.task!;
+    const k = task.kitchen!;
+    if (k.plan.length === 0) {
+      // the meal's clock starts at the counter (as the server's energy does, from arrival)
+      let end = now;
+      k.plan = kitchenSteps(k.look).map(({ step, seconds }) => ({ step, end: (end += seconds) }));
+      task.until = end;
+    }
+    const at = task.spot!.kind;
+    k.step = at === "counter" ? "prep" : at === "stove" ? "cook" : "eat";
+    task.phase = "kitchen";
+    this.setAnim(tw, k.step === "prep" ? "chop" : k.step === "cook" ? "stir" : "eat", now);
+    tw.bubble = k.step === "prep" ? task.action.emoji : k.step === "cook" ? "🍳" : "😋";
+    task.emojiUntil = now + 2;
+    task.emojiAt = now + 4 + this.random() * 3;
+  }
+
+  private stepKitchen(tw: SimTwin, now: number): void {
+    const task = tw.task!;
+    const k = task.kitchen!;
+    this.emojiTick(tw, task, now, task.spot?.kind);
+    const cur = k.plan.find((p) => p.step === k.step);
+    if (cur && now < cur.end) return;
+    if (k.step === "eat") {
+      this.finishTask(tw, now, true);
+      return;
+    }
+    // the next step with a place: the stove (unless this is a drink), else the seat
+    const from = task.spot!;
+    if (k.step === "prep" && k.stove) {
+      k.step = "cook";
+      task.spot = k.stove;
+    } else {
+      k.step = "carry";
+      task.spot = k.seat;
+    }
+    if (from.busyBy === tw.id) from.busyBy = null;
+    task.phase = "go";
+    tw.bubble = null;
+    this.walkKitchen(tw, task.spot);
+  }
+
+  private walkKitchen(tw: SimTwin, to: SpotState): void {
+    tw.route = kitchenPath(tw, to);
+    tw.onArrive = null;
+    tw.mode = "walk";
+    tw.anim = "idle";
+  }
+
   private mateOf(s: SpotState, all: SpotState[]): SpotState | undefined {
     if (s.kind === "coffee") return all.find((o) => o !== s && o.id.slice(0, -1) === s.id.slice(0, -1));
     const i = all.indexOf(s);
@@ -691,6 +921,11 @@ export class VillageSim {
     tw.z = spot.z;
     tw.yaw = spot.yaw;
     tw.bubble = null;
+    if (task.kitchen) {
+      this.arriveKitchen(tw, now);
+      if (!task.guest) this.arriveOrder(tw, now);
+      return;
+    }
     task.until = now + action.seconds;
     switch (task.kind) {
       case "coaster":
@@ -739,7 +974,11 @@ export class VillageSim {
         return;
       case "go":
         // the walk ended without reaching the spot (should not happen): retry
-        this.claimOrWait(tw, now);
+        if (task.kitchen) this.arriveTask(tw, now);
+        else this.claimOrWait(tw, now);
+        return;
+      case "kitchen":
+        this.stepKitchen(tw, now);
         return;
       case "queue":
       case "ride":
@@ -912,7 +1151,11 @@ export class VillageSim {
     tw.bubble = null;
     this.setAnim(tw, "idle", now);
     tw.nextWanderAt = now + 2 + this.random() * 3;
-    if (stepOff) {
+    if (stepOff && task.spot && STEP_BACK_KINDS.has(task.spot.kind)) {
+      // stand up backwards, away from the table / desk
+      tw.route = [{ x: from.x - Math.sin(task.spot.yaw) * STEP_OFF, z: from.z - Math.cos(task.spot.yaw) * STEP_OFF }];
+      tw.mode = "walk";
+    } else if (stepOff) {
       const w = waitPoint(task.zone, tw.id);
       const d = Math.hypot(w.x - from.x, w.z - from.z);
       if (d > 0.05) {
@@ -953,6 +1196,8 @@ export class VillageSim {
     const task = tw.task;
     if (!task) return;
     if (task.spot && task.spot.busyBy === tw.id) task.spot.busyBy = null;
+    const k = task.kitchen;
+    if (k) for (const s of [k.counter, k.stove, k.seat]) if (s && s.busyBy === tw.id) s.busyBy = null;
     tw.task = null;
     tw.hidden = false;
     tw.pitch = 0;

@@ -9,6 +9,7 @@ import {
   COASTER, EDGES, HOUSE, NODES, POOL, CINEMA, SPOTS, STREET, zoneCenter, type Pt, type Pt3
 } from "../../lib/village/layout";
 import { PADS, PAD_RADIUS, ROAD_W, VERGE_IN, isClear, rng, segDist } from "./scenery";
+import { KITCHEN_FLOOR, LIBRARY_ROOF } from "./venues/placeProps";
 
 // ---------------- the main street ----------------
 
@@ -43,15 +44,17 @@ function sideRoadDist(p: Pt): number {
  * The shared house (relative to the home centre): turned so its front (+z
  * local) faces the door spot, with the door spot on the doorstep.
  */
-/** How much bigger the house is drawn than its first design (walls, roof, door…). */
-export const HOUSE_SCALE = 1.5;
+/** The main house is drawn a little bigger than its first design (walls, roof, door…). */
+export const HOUSE_SCALE = 1.15;
+/** A lower side room on each side of the main house (world units): wider, not taller. */
+export const HOUSE_WING = { w: 0.85, d: 1.1 * HOUSE_SCALE * 0.8, wallH: 0.78, roofH: 0.36 };
 
 export const HOUSE_BODY = (() => {
   const door = HOUSE.door;
   const fx = door.x - HOUSE.x, fz = door.z - HOUSE.z;
   const len = Math.hypot(fx, fz);
   const ux = fx / len, uz = fz / len;
-  const w = 1.4 * HOUSE_SCALE, d = 1.1 * HOUSE_SCALE, step = 0.16;
+  const w = 1.4 * HOUSE_SCALE + 2 * HOUSE_WING.w, d = 1.1 * HOUSE_SCALE, step = 0.16; // w: main house + both side rooms
   return { x: door.x - ux * (d / 2 + step), z: door.z - uz * (d / 2 + step), yaw: Math.atan2(ux, uz), w, d };
 })();
 
@@ -90,8 +93,13 @@ type KeepOut = { kind: "ellipse"; x: number; z: number; rx: number; rz: number }
 
 const KEEP_OUT: KeepOut[] = (() => {
   const home = zoneCenter("home"), cafe = zoneCenter("maker_space"), pool = zoneCenter("pool"), cin = zoneCenter("cinema");
+  const kit = zoneCenter("kitchen"), lib = zoneCenter("library");
+  const R = LIBRARY_ROOF;
   return [
-    { kind: "ellipse", x: home.x + HOUSE_BODY.x, z: home.z + HOUSE_BODY.z, rx: 0.95 * HOUSE_SCALE, rz: 0.95 * HOUSE_SCALE },
+    // the kitchen's cooking floor and the library's roof reach a little past their round pads
+    { kind: "rect", x: kit.x + KITCHEN_FLOOR.x, z: kit.z + KITCHEN_FLOOR.z, hw: KITCHEN_FLOOR.w / 2 + 0.05, hd: KITCHEN_FLOOR.d / 2 + 0.05 },
+    { kind: "rect", x: lib.x + (R.x0 + R.x1) / 2, z: lib.z + (R.z0 + R.z1) / 2, hw: (R.x1 - R.x0) / 2 + 0.12, hd: (R.z1 - R.z0) / 2 + 0.12 },
+    { kind: "ellipse", x: home.x + HOUSE_BODY.x, z: home.z + HOUSE_BODY.z, rx: HOUSE_BODY.w / 2 + 0.1, rz: HOUSE_BODY.w / 2 + 0.1 },
     { kind: "rect", x: cafe.x + CAFE_BUILDING.x, z: cafe.z + CAFE_BUILDING.z, hw: CAFE_BUILDING.w / 2 + 0.12, hd: CAFE_BUILDING.d / 2 + 0.12 },
     { kind: "rect", x: pool.x + POOL_DECK.x, z: pool.z + POOL_DECK.z, hw: POOL_DECK.w / 2 + 0.05, hd: POOL_DECK.d / 2 + 0.05 },
     // the screen plus its legs and braces, which reach back (+z)
@@ -101,7 +109,7 @@ const KEEP_OUT: KeepOut[] = (() => {
   ];
 })();
 
-/** True inside a building or ride that reaches past its pad (house, café, pool deck, screen, coaster, ferris wheel). */
+/** True inside a building or ride that reaches past its pad (house, café, pool deck, screen, coaster, ferris wheel, kitchen floor, library roof). */
 export function inKeepOut(p: Pt, margin: number): boolean {
   for (const k of KEEP_OUT) {
     if (k.kind === "rect") {

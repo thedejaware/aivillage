@@ -9,3 +9,4 @@ export * from "./aiCost.js";
 export * from "./actions.js";
 export * from "./places.js";
 export * from "./energy.js";
+export * from "./dishes.js";

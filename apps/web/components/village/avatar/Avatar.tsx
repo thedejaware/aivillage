@@ -12,7 +12,7 @@ import { useFrame } from "@react-three/fiber";
 import { colorHex, HAIR_COLORS, OUTFIT_COLORS, SKIN_TONES, type Appearance } from "@aivillage/shared";
 import { bodyShape, headShape } from "./features";
 import type { AvatarPose } from "./types";
-import { LIMB, PoseBlender, bikeCrank, bikeWheel, faceFor, hipHeight, kernelVisible, propFor, seatLift, type Rig } from "./pose";
+import { LIMB, PoseBlender, bikeCrank, bikeWheel, chopLift, faceFor, hipHeight, kernelVisible, propFor, seatLift, type Rig } from "./pose";
 import {
   FOREARM, G, HEAD_Y, NECK_Y, SHOULDER_Y, UPPER_ARM, acquireFace, beardGeometry, beardMaterial, blankFace, faceGeometry, headGeometry, mat,
   moustacheGeometry, releaseFace, stubbleMaterial, torsoGeometry
@@ -71,6 +71,8 @@ const qWant = new THREE.Quaternion();
 const vA = new THREE.Vector3();
 const vB = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
+/** the wooden spoon points down and forward, into the pan */
+const INTO_PAN = new THREE.Vector3(0, -1, 0.45).normalize();
 const eTmp = new THREE.Euler();
 
 /** Orient `obj` so it has rotation `want` relative to the avatar root (e.g. upright cup). */
@@ -95,7 +97,9 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
   const n = useMemo(newNodes, []);
   const props = useMemo(newPropNodes, []);
   const blender = useMemo(() => new PoseBlender(Math.random()), []);
-  const live = useRef({ blinkAt: 1.5 + Math.random() * 3, faceKey: "", held: "", eyes: "", mouth: "", prop: "?" as string | null, seed: Math.random() * 10 });
+  const live = useRef({
+    blinkAt: 1.5 + Math.random() * 3, faceKey: "", held: "", eyes: "", mouth: "", prop: "?" as string | null, dish: "", seed: Math.random() * 10
+  });
   // let go of the shared face texture when this avatar goes away
   useEffect(() => () => {
     if (live.current.held) releaseFace(live.current.held);
@@ -105,6 +109,7 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
   // a re-render may remount parts: re-apply face + prop visibility next frame
   live.current.faceKey = "";
   live.current.prop = "?";
+  live.current.dish = "";
 
   const skinM = mat(skin);
   const topM = mat(look.top);
@@ -173,8 +178,19 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
       orientInRoot(props.cup, root, qWant.setFromEuler(eTmp.set(-0.75 * lift, 0, 0)));
     } else if (prop === "juice" && props.juice) {
       orientInRoot(props.juice, root, qWant.setFromEuler(eTmp.set(-0.6 * lift, 0, 0)));
-    } else if (prop === "plate") {
-      if (props.plate) orientInRoot(props.plate, root, qWant.setFromEuler(eTmp.set(0.05, 0, 0)));
+    } else if (prop === "plate" || prop === "dish") {
+      const plate = prop === "dish" ? props.dish : props.plate;
+      if (plate) orientInRoot(plate, root, qWant.setFromEuler(eTmp.set(0.05, 0, 0)));
+      if (prop === "dish") {
+        // tell the hand which dish it holds (only when it changes)
+        const look = p.dish ?? "plate";
+        if (look !== L.dish && props.setDish) {
+          L.dish = look;
+          props.setDish(look);
+        }
+        // a drink is a glass: no fork
+        if (props.groups.fork) props.groups.fork.visible = look !== "drink";
+      }
       // fork: tines toward the plate at rest, toward the mouth when the hand comes up
       if (props.fork) orientInRoot(props.fork, root, qWant.setFromEuler(eTmp.set(0.9 - 2.1 * lift, 0, 0.25 - 0.25 * lift)));
     } else if (prop === "popcorn") {
@@ -187,6 +203,13 @@ export function Avatar({ appearance, pose, scale = 1 }: { appearance: Appearance
       if (props.wheels[0]) props.wheels[0].rotation.x = w;
       if (props.wheels[1]) props.wheels[1].rotation.x = w;
       if (props.crank) props.crank.rotation.x = bikeCrank(p);
+    } else if (prop === "knife" && props.knife) {
+      // blade level over the board, tip up as the hand lifts
+      orientInRoot(props.knife, root, qWant.setFromEuler(eTmp.set(0.12 - 0.55 * chopLift(p.animTime), 0, 0)));
+    } else if (prop === "spatula" && props.spatula) {
+      orientInRoot(props.spatula, root, qWant.setFromUnitVectors(DOWN, INTO_PAN));
+    } else if (prop === "laptop" && props.laptop) {
+      orientInRoot(props.laptop, root, qWant.identity());
     } else if (prop === "phone" && props.phone) {
       orientInRoot(props.phone, root, qWant.setFromEuler(eTmp.set(-0.15, 0, 0.12)));
     } else if (prop === "can" && props.can) {

@@ -16,7 +16,7 @@ import { DrizzleConversationRepository, twinRefs, type NewConversation } from ".
 import { spendBeat } from "../economy/energy.js";
 import { planBeat } from "../agent/planner.js";
 import { converse } from "./conversation.js";
-import { isBusyNow, isSettledNow, settled, staminaAfter, staminaOf } from "./activity.js";
+import { isBusyNow, isSettledNow, orderEnergy, settled, staminaOf, withDish } from "./activity.js";
 
 export interface DayResult {
   /** One WorldState snapshot per beat — the client plays these back over time. */
@@ -380,7 +380,7 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
         } else {
           const def = findAction(res.action.id);
           const refused = partner && def ? !consentGiven(def, scoreOf(partner.id, w.twin.id)) : false;
-          const action = { ...res.action, ...(partner ? { refused } : {}) };
+          const action = withDish({ ...res.action, ...(partner ? { refused } : {}) });
           const partnerZone = partner ? (work.find((ww) => ww.twin.id === partner.id)?.twin ?? partner).locationZone : null;
           // a place activity happens at the place (a partner is invited along); touch goes to the partner
           const zone = (action.place && zoneByName.has(action.place) ? action.place : null) ?? partnerZone ?? action.place ?? w.twin.locationZone;
@@ -388,7 +388,7 @@ export async function runDay(llm: LlmClient, opts: RunDayOptions = {}): Promise<
             ...settled(w.twin, runStartedAt),
             locationZone: zone,
             order: {
-              energyTo: staminaAfter(staminaOf(w.twin, runStartedAt), action, zone),
+              ...orderEnergy(staminaOf(w.twin, runStartedAt), action, zone),
               kind: "act", auto: true, zone, targetName: partner?.name ?? null,
               label: partner ? `${action.label} ${partner.name}` : action.label,
               issuedAt: runStartedAt.toISOString(),

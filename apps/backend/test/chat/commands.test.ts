@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Twin } from "@aivillage/shared";
-import { ORDER_HOLD_MS, actHoldMs, findAction } from "@aivillage/shared";
+import { ORDER_HOLD_MS, actHoldMs, findAction, kitchenEnergyPhases, KITCHEN_DISHES } from "@aivillage/shared";
 import { parseCommand, applyCommand, commandAck, normalizeZone } from "../../src/chat/commands.js";
 
 const VILLAGERS = ["Ravi", "Aiko", "Daniel Park", "Sena"];
@@ -261,8 +261,9 @@ describe("applyCommand: energy", () => {
       expect(out.reply).toBe("I'm tired, let me rest first.");
       expect(out.changed).toBe(true);
       expect(out.target).toBeNull();
-      expect(out.twin.order).toMatchObject({ kind: "act", auto: true, zone: "maker_space" });
-      expect(out.twin.order!.energyTo).toBeGreaterThan(15);
+      // tired twins go home to sleep (rest elsewhere is slow now)
+      expect(out.twin.order).toMatchObject({ kind: "act", auto: true, zone: "home", action: { id: "sleep" } });
+      expect(out.twin.order!.energyTo).toBe(100);
     }
   });
 
@@ -314,5 +315,141 @@ describe("applyCommand: energy", () => {
     const out = applyCommand(me, { type: "act", action: "watch_movie", target: "Sena" }, all(me), NOW, () => -60);
     expect(out.twin.order).toMatchObject({ zone: "cinema", targetName: null });
     expect(out.declinedBy?.id).toBe("sena");
+  });
+});
+
+describe("parseCommand: the kitchen", () => {
+  const cook = (name: string, look: string, target: string | null = null) =>
+    ({ type: "act", action: "cook", target, dish: { name, look } });
+
+  it.each([
+    ["cook pasta", cook("pasta", "pasta")],
+    ["cook me pasta", cook("pasta", "pasta")],
+    ["please cook some spaghetti", cook("spaghetti", "pasta")],
+    ["make a hamburger", cook("hamburger", "burger")],
+    ["prepare a steak", cook("steak", "steak")],
+    ["bake a cake", cook("cake", "dessert")],
+    ["make a smoothie", cook("smoothie", "drink")],
+    ["make juice in the kitchen", cook("juice", "drink")],
+    ["cook sushi", cook("sushi", "plate")],
+    ["cook pasta with Sena", cook("pasta", "pasta", "Sena")],
+    ["make pasta in the kitchen with ravi", cook("pasta", "pasta", "Ravi")]
+  ])("%s → cook", (msg, cmd) => {
+    expect(parseCommand(msg, VILLAGERS)).toEqual(cmd);
+  });
+
+  it("no dish named → the twin picks one later", () => {
+    for (const msg of ["cook", "cook something", "cook a meal", "cook dinner", "go to the kitchen", "eat in the kitchen", "make food"]) {
+      expect(parseCommand(msg, VILLAGERS), msg).toEqual({ type: "act", action: "cook", target: null });
+    }
+    expect(parseCommand("cook with Sena", VILLAGERS)).toEqual({ type: "act", action: "cook", target: "Sena" });
+    expect(parseCommand("take Sena to the kitchen", VILLAGERS)).toEqual({ type: "act", action: "cook", target: "Sena" });
+  });
+
+  it("the café keeps all its words", () => {
+    for (const [msg, id] of [
+      ["juice", "drink_juice"], ["make juice", "drink_juice"], ["drink juice", "drink_juice"], ["have a juice", "drink_juice"],
+      ["eat", "eat"], ["have lunch", "eat"], ["have dinner", "eat"], ["coffee", "drink_coffee"]
+    ]) {
+      expect(parseCommand(msg, VILLAGERS), msg).toEqual({ type: "act", action: id, target: null });
+    }
+  });
+
+  it("other 'make' phrases are not cooking", () => {
+    expect(parseCommand("make a phone call", VILLAGERS)).toEqual({ type: "act", action: "phone_call", target: null });
+    expect(parseCommand("make a wish", VILLAGERS)).toBeNull();
+    expect(parseCommand("I cooked pasta yesterday", VILLAGERS)).toBeNull();
+    expect(parseCommand("I went to the kitchen", VILLAGERS)).toBeNull();
+  });
+});
+
+describe("parseCommand: the library", () => {
+  it.each([
+    ["read in the library", "read_library"],
+    ["go to the library", "read_library"],
+    ["read a book in the library", "read_library"],
+    ["study", "study"],
+    ["do homework", "study"],
+    ["work on the laptop", "study"],
+    ["study in the library", "study"],
+    ["read a book", "read"],
+    ["work out", "work_out"]
+  ])("%s → %s", (msg, action) => {
+    expect(parseCommand(msg, VILLAGERS)).toEqual({ type: "act", action, target: null });
+  });
+
+  it("'take Sena to the library'", () => {
+    expect(parseCommand("take Sena to the library", VILLAGERS)).toEqual({ type: "act", action: "read_library", target: "Sena" });
+  });
+});
+
+describe("applyCommand: the kitchen", () => {
+  const sena: Twin = { ...ravi, id: "sena", name: "Sena", locationZone: "maker_space" };
+  const all = (t: Twin) => [t, ravi, sena];
+  const cookPasta = { type: "act" as const, action: "cook", target: null, dish: { name: "pasta", look: "pasta" as const } };
+
+  it("a cook order carries the dish and the kitchen's energy phases, not energyTo", () => {
+    const out = applyCommand({ ...me, stamina: 60 }, cookPasta, all(me), NOW);
+    const o = out.twin.order!;
+    expect(o).toMatchObject({ kind: "act", zone: "kitchen", action: { id: "cook", dish: { name: "pasta", look: "pasta" } } });
+    expect(o.action!.label).toContain("pasta");
+    expect(o.energyPhases).toEqual(kitchenEnergyPhases("pasta"));
+    expect(o.energyTo ?? null).toBeNull();
+    expect(Date.parse(o.holdUntil) - NOW.getTime()).toBe(actHoldMs(findAction("cook")!));
+    expect(out.twin.locationZone).toBe("kitchen");
+  });
+
+  it("'cook sushi': the label says sushi, the look is a plain plate", () => {
+    const out = applyCommand(me, parseCommand("cook sushi", VILLAGERS)!, all(me), NOW);
+    expect(out.twin.order!.action!.dish).toEqual({ name: "sushi", look: "plate" });
+    expect(out.twin.order!.label).toContain("sushi");
+  });
+
+  it("no dish named → a dish from the menu", () => {
+    const out = applyCommand(me, { type: "act", action: "cook", target: null }, all(me), NOW, () => 0, () => 0);
+    expect(out.twin.order!.action!.dish).toEqual(KITCHEN_DISHES[0]);
+    expect(out.twin.order!.energyPhases).toEqual(kitchenEnergyPhases(KITCHEN_DISHES[0].look));
+  });
+
+  it("a tired twin asked to cook says the exact line and goes home to sleep", () => {
+    const out = applyCommand({ ...me, stamina: 15 }, cookPasta, all(me), NOW);
+    expect(out.reply).toBe("I'm tired, let me rest first.");
+    expect(out.twin.order).toMatchObject({ zone: "home", auto: true, action: { id: "sleep" } });
+  });
+
+  it("'cook pasta with Sena': Sena comes along to the kitchen and cooks the same dish", () => {
+    const out = applyCommand(me, parseCommand("cook pasta with Sena", VILLAGERS)!, all(me), NOW, () => 20);
+    expect(out.target?.id).toBe("sena");
+    expect(out.twin.order).toMatchObject({ zone: "kitchen", targetName: "Sena", action: { id: "cook", targetName: "Sena", dish: { name: "pasta" } } });
+  });
+
+  it("a full kitchen (4 cooking) can't take a 5th twin", () => {
+    const cooks = [1, 2, 3, 4].map((i) => ({
+      ...ravi, id: `c${i}`, name: `C${i}`,
+      order: { kind: "act" as const, zone: "kitchen", targetName: null, label: "cook", issuedAt: NOW.toISOString(), holdUntil: new Date(NOW.getTime() + 60_000).toISOString() }
+    }));
+    const out = applyCommand(me, cookPasta, [me, ...cooks], NOW);
+    expect(out.changed).toBe(false);
+    expect(out.refusal).toMatch(/kitchen is full/);
+  });
+
+  it("the library: energyTo as usual (reading up, studying down)", () => {
+    const read = applyCommand({ ...me, stamina: 50 }, { type: "act", action: "read_library", target: null }, all(me), NOW);
+    expect(read.twin.order).toMatchObject({ zone: "library", energyTo: 52 });
+    const study = applyCommand({ ...me, stamina: 50 }, { type: "act", action: "study", target: null }, all(me), NOW);
+    expect(study.twin.order).toMatchObject({ zone: "library", energyTo: 48 });
+    expect(study.twin.order!.energyPhases ?? null).toBeNull();
+  });
+
+  it("a tired twin asked to study goes home; reading is fine", () => {
+    expect(applyCommand({ ...me, stamina: 15 }, { type: "act", action: "study", target: null }, all(me), NOW).reply).toBe("I'm tired, let me rest first.");
+    expect(applyCommand({ ...me, stamina: 15 }, { type: "act", action: "read_library", target: null }, all(me), NOW).reply).toBeUndefined();
+  });
+});
+
+describe("commandAck: cooking", () => {
+  it("names the dish", () => {
+    expect(commandAck("Memo", { type: "act", action: "cook", target: null, dish: { name: "pasta", look: "pasta" } })).toContain("On it — cooking pasta!");
+    expect(commandAck("Memo", { type: "act", action: "study", target: null })).toMatch(/On it — study/);
   });
 });

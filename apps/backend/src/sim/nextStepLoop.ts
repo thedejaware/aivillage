@@ -12,7 +12,7 @@ import {
   nextStepContext, planNextSteps, restStep, ruleNextStep, type NextStep
 } from "../agent/nextStepPlanner.js";
 import { OWNER_FACT_KIND } from "../chat/twinChat.js";
-import { activityDelta, isTiring, settled, staminaAfter, staminaOf } from "./activity.js";
+import { isTiring, orderEnergy, settled, staminaOf, withDish } from "./activity.js";
 import { claimTwins, isClaimed, releaseTwins } from "./twinLocks.js";
 import { clearQueuedSteps, queuedSteps, queuedTwinIds, setQueuedSteps } from "./stepQueue.js";
 
@@ -53,7 +53,7 @@ const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
  * (and isn't too tired for something tiring) gets the matching order; a "no" is
  * remembered and the twin goes alone.
  */
-export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date): Promise<Twin> {
+export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date, random: () => number = Math.random): Promise<Twin> {
   const repo = new DrizzleTwinRepository(db);
   const memRepo = new DrizzleMemoryRepository(db);
   const relRepo = new DrizzleRelationshipRepository(db);
@@ -61,7 +61,8 @@ export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date): 
   let res = resolveAction({ action: step.action, target: step.partner });
   if (!res.ok) res = resolveAction({ action: placeOf(step.zone)?.mainAction ?? "sit" });
   if (!res.ok) return twin;
-  const action = res.action;
+  // "cook": the dish rides on the action; an invited partner cooks the same dish
+  const action = withDish(res.action, step.dish, random);
   const zone = step.zone;
 
   let partner: Twin | null = null;
@@ -78,7 +79,7 @@ export async function applyStep(db: DB, twin: Twin, step: NextStep, now: Date): 
   }
 
   const orderWith = (withName: string | null, who: Twin): OwnerOrder => ({
-    energyTo: staminaAfter(staminaOf(who, now), action, zone),
+    ...orderEnergy(staminaOf(who, now), action, zone),
     kind: "act",
     auto: true,
     zone,
@@ -126,7 +127,7 @@ function chooseStep(
     const step = queue.shift()!;
     const place = ctx.places.find((p) => p.zone === step.zone);
     if (!place) continue; // full now: on to the next planned step
-    if (isTired(ctx.stamina) && activityDelta(findAction(step.action) ?? null, step.zone) < 0) {
+    if (isTired(ctx.stamina) && isTiring(findAction(step.action) ?? null, step.zone)) {
       return { step: restStep(twin, ctx, ctx.stamina, random), rest: [] };
     }
     let partner = step.partner;
@@ -217,7 +218,7 @@ export function startNextStepLoop(opts: NextStepLoopOptions): NextStepLoop {
         const plan = plans[i] ?? queuedSteps(fresh.id);
         const { step, rest } = chooseStep(fresh, plan, all, t, rels, random);
         setQueuedSteps(fresh.id, rest);
-        await applyStep(db, fresh, step, t);
+        await applyStep(db, fresh, step, t, random);
         started++;
         all = await repo.listAll();
       }

@@ -44,6 +44,8 @@ export const NODES: Record<string, Pt> = {
   LAWN: C("event_space"),
   POOL: C("pool"),
   CINEMA: C("cinema"),
+  KITCHEN: C("kitchen"),
+  LIBRARY: C("library"),
   FUN: { x: 8.2, z: 0.9 }, // the coaster station gate (the funfair centre is under the track)
   S0: { x: -7.4, z: 0.4 }, // clear of the (bigger) house pad
   S1: { x: -6.6, z: -1.4 },
@@ -61,7 +63,8 @@ export const STREET: string[] = ["HOME", "S0", "S1", "S2", "S3", "S4", "S5", "S6
 export const EDGES: [string, string][] = [
   ...STREET.slice(1).map((id, i) => [STREET[i], id] as [string, string]),
   ["QUIET", "S1"], ["BIKES", "S0"], ["CAFE", "S2"], ["GARDEN", "S3"], ["STAGE", "S4"],
-  ["GYM", "S5"], ["LAWN", "S6"], ["POOL", "S7"], ["CINEMA", "S7"]
+  ["GYM", "S5"], ["LAWN", "S6"], ["POOL", "S7"], ["CINEMA", "S7"],
+  ["KITCHEN", "S2"], ["LIBRARY", "QUIET"] // the library is reached through the quiet corner
 ];
 
 export const dist2 = (a: Pt, b: Pt) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
@@ -130,7 +133,8 @@ export function findRoute(from: Pt, to: Pt): Pt[] {
 
 export type ActivityKind =
   | "coffee" | "bench" | "blanket" | "stage" | "bed" | "treadmill" | "weights"
-  | "swim" | "lounger" | "cinema" | "plot" | "coaster" | "bike";
+  | "swim" | "lounger" | "cinema" | "plot" | "coaster" | "bike"
+  | "counter" | "stove" | "table" | "armchair" | "desk";
 
 export interface SpotDef {
   id: string;
@@ -145,8 +149,8 @@ export interface SpotDef {
 /** Café tables (relative to THE CAFÉ's centre); two seats per table, facing each other along x. */
 export const CAFE_TABLES: Pt[] = [{ x: -1.4, z: 0.45 }, { x: -0.5, z: 1.25 }, { x: 0.5, z: 1.25 }, { x: 1.4, z: 0.45 }];
 export const CAFE_SEAT_OFFSET = 0.32;
-/** Bench at QUIET CORNER (relative), away from its road; two seats along it. */
-export const BENCH = { x: 0.1, z: -0.75, width: 0.85 };
+/** Bench at QUIET CORNER (relative), east of the path that runs through it (street ↔ library); two seats along it. */
+export const BENCH = { x: 0.75, z: -0.1, width: 0.85 };
 /** Picnic blanket at THE LAWN (relative). */
 export const BLANKET = { x: -0.18, z: 0.21, w: 0.85, d: 0.65 };
 /** Stage platform at THE STAGE (relative). */
@@ -180,6 +184,35 @@ export const CINEMA = {
   seatsX: [-1.3, -0.65, 0, 0.65, 1.3]
 };
 
+/**
+ * The open-air kitchen (relative; its path comes in from +z). Four cooking
+ * stations across the back: a twin preps at the island (standing at `prepZ`,
+ * facing −z), then turns to the burner behind it (standing at `stoveZ`).
+ * The long table runs along z on the east side; the oven stands on the west.
+ */
+export const KITCHEN = {
+  stations: [-1.1, -0.4, 0.4, 1.1],
+  island: { x: 0, z: -0.85, w: 2.9, d: 0.4 },
+  range: { x: 0, z: -1.8, w: 2.7, d: 0.4 },
+  prepZ: -0.45,
+  stoveZ: -1.42,
+  table: { x: 1.2, z: 0.9, w: 0.5, d: 1.7 },
+  seatsZ: [0.3, 0.7, 1.1, 1.5],
+  seatOffset: 0.38,
+  oven: { x: -1.6, z: 0.15 }
+};
+
+/**
+ * The library pavilion (relative; its path comes in from +z): shelves across
+ * the back, armchairs on the west facing the middle, desks on the east (the
+ * twin sits at `seatX` facing +x, the desk is at `x`).
+ */
+export const LIBRARY = {
+  shelves: [{ x: -0.75, z: -1.4, w: 1.1 }, { x: 0.55, z: -1.4, w: 1.1 }],
+  armchairs: [{ x: -1.25, z: -0.75 }, { x: -0.55, z: -0.95 }, { x: -1.35, z: 0.1 }, { x: -0.8, z: 0.6 }] as Pt[],
+  desks: [-0.9, -0.3, 0.3, 0.9].map((z) => ({ x: 1.2, z, seatX: 0.85 }))
+};
+
 const rel = (zone: string, p: Pt): Pt => {
   const c = zoneCenter(zone);
   return { x: c.x + p.x, z: c.z + p.z };
@@ -208,6 +241,16 @@ function buildSpots(): SpotDef[] {
   add("lawn-3", "event_space", "blanket", { x: 0.45, z: 0.75 }, -Math.PI * 0.75);
   CINEMA.rows.forEach((z, r) => CINEMA.seatsX.forEach((x, i) => add(`cinema-${r}${i}`, "cinema", "cinema", { x, z }, 0)));
   COASTER_QUEUE.forEach((p, i) => out.push({ id: `queue-${i}`, zone: "funfair", kind: "coaster", ...p, yaw: Math.PI / 2 }));
+  KITCHEN.stations.forEach((x, i) => {
+    add(`counter-${i}`, "kitchen", "counter", { x, z: KITCHEN.prepZ }, Math.PI);
+    add(`stove-${i}`, "kitchen", "stove", { x, z: KITCHEN.stoveZ }, Math.PI);
+  });
+  KITCHEN.seatsZ.forEach((z, i) => {
+    add(`table-${i}a`, "kitchen", "table", { x: KITCHEN.table.x - KITCHEN.seatOffset, z }, Math.PI / 2);
+    add(`table-${i}b`, "kitchen", "table", { x: KITCHEN.table.x + KITCHEN.seatOffset, z }, -Math.PI / 2);
+  });
+  LIBRARY.armchairs.forEach((p, i) => add(`armchair-${i}`, "library", "armchair", p, Math.atan2(-p.x, -p.z)));
+  LIBRARY.desks.forEach((d, i) => add(`desk-${i}`, "library", "desk", { x: d.seatX, z: d.z }, Math.PI / 2));
   return out;
 }
 

@@ -4,7 +4,7 @@ import {
 } from "../../lib/village/layout";
 import { PADS, PAD_RADIUS, ROAD_W } from "../../components/village/scenery";
 import {
-  STREET_W, BIKE_LANE, streetDist, isStreetEdge, HOUSE_BODY, CAFE_BUILDING, POOL_DECK, FERRIS, decorClear, scatter,
+  STREET_W, BIKE_LANE, streetDist, isStreetEdge, HOUSE_BODY, HOUSE_SCALE, HOUSE_WING, CAFE_BUILDING, POOL_DECK, FERRIS, decorClear, scatter,
   streetLamps, bikesShown, railLine, coasterSupports, houseDoorWorld
 } from "../../components/village/decor";
 
@@ -51,7 +51,11 @@ describe("buildings that stick out of their pads", () => {
   });
 
   it("the house stays on its pad", () => {
-    expect([HOUSE_BODY.w, HOUSE_BODY.d]).toEqual([1.4 * 1.5, 1.1 * 1.5]); // half again as big as the first house
+    // wider, not taller: a slightly bigger main house plus a side room on each side
+    expect(HOUSE_SCALE).toBeLessThanOrEqual(1.2);
+    expect(HOUSE_BODY.w).toBeCloseTo(1.4 * HOUSE_SCALE + 2 * HOUSE_WING.w, 6);
+    expect(HOUSE_WING.w).toBeGreaterThanOrEqual(0.8);
+    expect(HOUSE_WING.wallH).toBeLessThan(0.92 * HOUSE_SCALE); // the side rooms sit lower than the main house
     const r = Math.hypot(HOUSE_BODY.w / 2, HOUSE_BODY.d / 2);
     expect(Math.hypot(HOUSE_BODY.x, HOUSE_BODY.z) + r).toBeLessThan(PAD_RADIUS.home);
   });

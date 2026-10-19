@@ -31,7 +31,7 @@ export const LIMB = { thigh: 0.14, shin: 0.13, hipDrop: 0.02, restHip: 0.31 } as
 export type EyeState = "base" | "closed" | "happy" | "cry";
 export type MouthState = "base" | "open" | "o" | "pucker" | "frown" | "flat";
 export type PropId =
-  | "cup" | "book" | "phone" | "broom" | "can" | "food" | "bubbles" | "finger" | "zzz"
+  | "cup" | "book" | "phone" | "broom" | "can" | "food" | "bubbles" | "finger" | "zzz" | "knife" | "spatula"
   // held items (AvatarPose.item) + the bike the avatar draws under itself
   | ActionItem | "bike";
 
@@ -157,6 +157,12 @@ const liftPressTop = (t: number) => {
   const p = t % LIFT_CYCLE;
   return p > 5.2 && p < 7.0 ? 0.5 - 0.5 * Math.cos((TAU * (p - 5.2)) / 0.9) : 0;
 };
+
+/** chop: ~2 chops a second, with a short pause every 6 s; 1 = knife up, 0 = on the board */
+const CHOP_HZ = 2.2;
+export const chopLift = (t: number) => (0.5 - 0.5 * Math.cos(TAU * CHOP_HZ * t)) * (1 - window_(t % 6, 4.8, 6, 0.3));
+/** type: a thinking pause every 7 s (hands lift off the keys, head tilts) */
+const typePause = (t: number) => window_(t % 7, 5, 6.4, 0.35);
 
 const breathe = (t: number, r: Rig) => {
   const b = osc(t, 0.25);
@@ -380,8 +386,8 @@ const ANIMS: Record<BodyAnim, AnimFn> = {
     r.lso = 0.12;
     r.lez = -0.4;
     r.hx = 0.12 - 0.12 * q;
-    // a plate in the left hand comes in front of the chest
-    if (pose.item === "plate") {
+    // a plate (or the dish the twin cooked) in the left hand comes in front of the chest
+    if (pose.item === "plate" || pose.item === "dish") {
       r.lez = -0.85;
       r.le = 1.25;
       r.hx += 0.06;
@@ -671,6 +677,54 @@ const ANIMS: Record<BodyAnim, AnimFn> = {
     r.hx += laugh * (-0.28 + 0.06 * osc(t, 6, 0.25));
     r.lso += 0.05 * laugh * shake;
   },
+  chop(t, _s, r) {
+    // at the counter: the right hand chops (forearm up and down over the board), the left holds the food
+    breathe(t, r);
+    const up = chopLift(t);
+    r.rsf = 0.8 + 0.15 * up;
+    r.re = 0.7 + 0.6 * up;
+    r.rso = 0.15;
+    r.rez = -0.3;
+    r.rw = 0.2 * up;
+    r.lsf = 0.75;
+    r.le = 1.0;
+    r.lso = 0.15;
+    r.lez = -0.55;
+    r.sx = 0.12;
+    r.hx = 0.32 + 0.03 * up;
+    r.hy = 0.04 * osc(t, 0.15);
+  },
+  stir(t, _s, r) {
+    // at the stove: the right hand circles a spoon in the pan, the left holds the pan's handle
+    breathe(t, r);
+    const w = TAU * 0.7 * t;
+    r.rsf = 0.85 + 0.12 * Math.sin(w);
+    r.rso = 0.25 + 0.12 * Math.cos(w);
+    r.re = 0.95;
+    r.rez = -0.35 + 0.08 * Math.cos(w);
+    r.lsf = 0.7;
+    r.le = 0.85;
+    r.lso = 0.2;
+    r.lez = -0.25;
+    r.sx = 0.08;
+    r.hx = 0.3;
+    r.hz = 0.04 * Math.sin(w);
+  },
+  type(t, _s, r) {
+    // hands forward on a laptop (seated at a desk: the sim sets `seated`), fingers tapping in turn
+    breathe(t, r);
+    const pause = typePause(t);
+    const tap = 0.18 * (1 - pause);
+    r.lsf = r.rsf = 0.4 + 0.08 * pause;
+    r.le = r.re = 1.3 + 0.1 * pause;
+    r.lez = r.rez = -0.7;
+    r.lw = tap * Math.max(0, osc(t, 3.1));
+    r.rw = tap * Math.max(0, osc(t, 3.1, 0.5));
+    r.sx = 0.06;
+    r.hx = 0.3 - 0.1 * pause;
+    r.hy = 0.15 * pause;
+    r.hz = 0.08 * pause;
+  },
   ride(t, _s, r) {
     // seated in the coaster cart, both hands on the bar in front; calm-excited sway (the sim cheers on the drop)
     r.g = 0;
@@ -693,7 +747,9 @@ const ANIMS: Record<BodyAnim, AnimFn> = {
 };
 
 /** Anims that keep their arm pose while walking (the hands are busy). */
-const BUSY_ARMS = new Set<BodyAnim>(["wave", "point", "phone", "drink", "eat", "read", "sweep", "water", "think", "cry", "wash", "clap"]);
+const BUSY_ARMS = new Set<BodyAnim>([
+  "wave", "point", "phone", "drink", "eat", "read", "sweep", "water", "think", "cry", "wash", "clap", "chop", "stir", "type"
+]);
 
 /** Anims that move the whole body along (pool lane, bike route, coaster): walking keeps their pose. */
 const RIDING = new Set<BodyAnim>(["swim", "bike", "ride"]);
@@ -716,7 +772,7 @@ export function seatLift(r: Rig, anim: BodyAnim, scale: number, bodyScale: numbe
 }
 
 /** Items carried in one arm while walking or standing around (the arm holds still). */
-const CARRY: Partial<Record<ActionItem, "l" | "r">> = { juice: "r", plate: "l", popcorn: "l", basket: "l" };
+const CARRY: Partial<Record<ActionItem, "l" | "r">> = { juice: "r", plate: "l", popcorn: "l", basket: "l", dish: "l" };
 const CARRY_ANIMS = new Set<BodyAnim>(["idle", "talk"]);
 
 /** The holding arm: forearm forward (a glass, plate or tub) or a basket hanging on the forearm. */
@@ -855,6 +911,12 @@ export function faceFor(p: AvatarPose): FaceState {
       return { eyes: osc(t, 0.3) > 0.4 ? "happy" : "base", mouth: "open" };
     case "bike":
       return { eyes: "base", mouth: "base" };
+    case "chop":
+      return { eyes: "base", mouth: "flat" };
+    case "stir":
+      return { eyes: "base", mouth: osc(t, 0.2) > 0.6 ? "o" : "flat" };
+    case "type":
+      return { eyes: "base", mouth: typePause(t) > 0.5 ? "base" : "flat" };
     default:
       return { eyes: "base", mouth: "base" };
   }
@@ -879,6 +941,9 @@ export function propFor(p: AvatarPose): PropId | null {
     case "wash": return "bubbles";
     case "point": return "finger";
     case "sleep": return "zzz";
+    case "chop": return "knife";
+    case "stir": return "spatula";
+    case "type": return "laptop";
     default: return null;
   }
 }

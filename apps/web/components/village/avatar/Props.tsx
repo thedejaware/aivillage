@@ -1,23 +1,29 @@
 "use client";
 
 /**
- * Hand-held props (cup, phone, broom, watering can, apple, book), held items
- * (juice glass, plate + fork, popcorn tub, basket, dumbbells), the avatar's
+ * Hand-held props (cup, phone, broom, watering can, apple, book, kitchen knife,
+ * wooden spoon, laptop), held items (juice glass, plate + fork, the cooked dish
+ * + fork, popcorn tub, basket, dumbbells), the avatar's
  * own bike and small effects (bubbles, water drops, sleep "z"). They are
  * always mounted but hidden; Avatar.tsx shows the one the current anim needs
  * and orients it.
  */
+import { useEffect, useState } from "react";
 import * as THREE from "three";
+import type { DishLook } from "@aivillage/shared";
+import { DishModel } from "../dishes";
 import { BIKE, type PropId } from "./pose";
 import { geo, mat, merge, place, sphere, capsule, rbox, zzzMaterial } from "./assets";
 import { M } from "./Look";
 
 /** A prop can need more than one node (plate + fork, two dumbbells); the basket also has a spot on the ground. */
 export type PropNodeKey = PropId | "fork" | "dumbbellL" | "basketGround";
-const COMPANION: Partial<Record<PropNodeKey, PropNodeKey>> = { fork: "plate", dumbbellL: "dumbbell" };
+const COMPANION: Partial<Record<PropNodeKey, PropNodeKey[]>> = { fork: ["plate", "dish"], dumbbellL: ["dumbbell"] };
 /** Is node `id` part of the shown prop? */
 export const nodeShown = (id: string, shown: PropNodeKey | null) =>
-  shown !== null && (id === shown || COMPANION[id as PropNodeKey] === shown);
+  shown !== null && (id === shown || (COMPANION[id as PropNodeKey]?.includes(shown) ?? false));
+/** The venue's dish models are drawn at this size in the hand (tune with the kitchen's plates). */
+const HELD_DISH_SCALE = 1;
 
 export interface PropNodes {
   groups: Partial<Record<PropNodeKey, THREE.Object3D>>;
@@ -31,6 +37,12 @@ export interface PropNodes {
   fork: THREE.Group | null;
   tub: THREE.Group | null;
   basket: THREE.Group | null;
+  knife: THREE.Group | null;
+  spatula: THREE.Group | null;
+  laptop: THREE.Group | null;
+  dish: THREE.Group | null;
+  /** set by <HeldDish>: which dish the hand holds (a React re-render of that small part only) */
+  setDish: ((look: DishLook) => void) | null;
   kernel: THREE.Object3D | null;
   wheels: [THREE.Object3D | null, THREE.Object3D | null];
   crank: THREE.Object3D | null;
@@ -41,7 +53,8 @@ export interface PropNodes {
 
 export const newPropNodes = (): PropNodes => ({
   groups: {}, cup: null, phone: null, can: null, broom: null,
-  juice: null, plate: null, fork: null, tub: null, basket: null, kernel: null, wheels: [null, null], crank: null,
+  juice: null, plate: null, fork: null, tub: null, basket: null, knife: null, spatula: null, laptop: null, dish: null, setDish: null,
+  kernel: null, wheels: [null, null], crank: null,
   bubbles: [], drops: [], zs: []
 });
 
@@ -110,6 +123,25 @@ export function HandProps({ n }: { n: PropNodes }) {
       <group ref={reg(n, "dumbbell")} position={[0.0, -0.035, 0.0]}>
         <M g={dumbbellGeo()} m={mat("#3d4350", { rough: 0.45, metal: 0.3 })} />
       </group>
+      {/* kitchen knife: the blade points forward (+z of the avatar), Avatar tilts it with the chop */}
+      <group ref={reg(n, "knife")} position={[0.0, -0.04, 0.015]}>
+        <group ref={(g) => { n.knife = g; }}>
+          <M g={geo("knifeHandle", () => place(capsule(0.009, 0.045), [0, 0, 0.0], [Math.PI / 2, 0, 0]))} m={mat("#3b2a20", { rough: 0.6 })} shadow={false} />
+          <M g={geo("knifeBlade", () => merge([
+            place(new THREE.BoxGeometry(0.004, 0.026, 0.085), [0, -0.004, 0.068]),
+            place(new THREE.BoxGeometry(0.004, 0.012, 0.02), [0, -0.012, 0.118], [0.5, 0, 0])
+          ]))} m={mat("#d9dee5", { rough: 0.25, metal: 0.7 })} shadow={false} />
+        </group>
+      </group>
+      {/* wooden spoon: hangs from the fist, Avatar points it down into the pan */}
+      <group ref={reg(n, "spatula")} position={[0.0, -0.035, 0.015]}>
+        <group ref={(g) => { n.spatula = g; }}>
+          <M g={geo("spoon", () => merge([
+            place(new THREE.CylinderGeometry(0.006, 0.007, 0.16, 8), [0, -0.05, 0]),
+            place(sphere(0.02, 10, 8), [0, -0.135, 0], [0, 0, 0], [1, 1.25, 0.45])
+          ]))} m={mat("#c99a62", { rough: 0.8 })} shadow={false} />
+        </group>
+      </group>
       <mesh ref={(o) => { n.kernel = o; if (o) o.visible = false; }} geometry={geo("kernel", () => sphere(0.014, 8, 6).scale(1, 0.85, 1))}
         material={mat("#fff3c4", { rough: 0.8 })} position={[0.0, -0.078, 0.02]} />
     </>
@@ -163,8 +195,31 @@ export function LeftHandProps({ n }: { n: PropNodes }) {
       <group ref={reg(n, "dumbbellL")} position={[0.0, -0.035, 0.0]}>
         <M g={dumbbellGeo()} m={mat("#3d4350", { rough: 0.45, metal: 0.3 })} />
       </group>
+      <group ref={reg(n, "dish")}>
+        <group ref={(g) => { n.dish = g; }}>
+          {/* DishModel's origin is the plate's bottom: the same spot as the plain plate's */}
+          <group position={[-0.07, -0.0465, 0.04]} scale={HELD_DISH_SCALE}>
+            <HeldDish n={n} />
+          </group>
+        </group>
+      </group>
     </>
   );
+}
+
+/**
+ * The dish the twin cooked, on its plate. Its look comes from the pose each
+ * frame; Avatar calls `n.setDish` only when it changes, so just this part re-renders.
+ */
+function HeldDish({ n }: { n: PropNodes }) {
+  const [look, setLook] = useState<DishLook | null>(null);
+  useEffect(() => {
+    n.setDish = setLook;
+    return () => {
+      n.setDish = null;
+    };
+  }, [n]);
+  return look ? <DishModel look={look} stage="plate" /> : null;
 }
 
 /** Wicker basket with carrots and a lettuce; origin = top of the handle (it hangs below). */
@@ -291,6 +346,19 @@ export function ChestProps({ n }: { n: PropNodes }) {
           place(rbox(0.092, 0.012, 0.118, 0.003), [-0.046, 0.008, 0], [0, 0, 0.2]),
           place(rbox(0.092, 0.012, 0.118, 0.003), [0.046, 0.008, 0], [0, 0, -0.2])
         ]))} m={mat("#fbf7ee")} shadow={false} />
+      </group>
+      {/* laptop on the lap / desk under the typing hands; Avatar keeps it level */}
+      <group ref={reg(n, "laptop")} position={[0, 0.1, 0.19]}>
+        <group ref={(g) => { n.laptop = g; }}>
+          <M g={geo("laptopBody", () => merge([
+            rbox(0.17, 0.012, 0.11, 0.004),
+            // the lid, hinged at the far edge and tilted back
+            place(rbox(0.17, 0.11, 0.008, 0.004), [0, 0.053, 0.069], [0.25, 0, 0])
+          ]))} m={mat("#9aa3ad", { rough: 0.35, metal: 0.5 })} />
+          <M g={geo("laptopKeys", () => place(new THREE.BoxGeometry(0.14, 0.002, 0.05), [0, 0.007, -0.012]))} m={mat("#2c3038", { rough: 0.6 })} shadow={false} />
+          <M g={geo("laptopScreen", () => place(new THREE.PlaneGeometry(0.15, 0.09), [0, 0.054, 0.064], [0.25 + Math.PI, 0, 0]))}
+            m={mat("#bfe6ff", { rough: 0.2 })} shadow={false} />
+        </group>
       </group>
       <group ref={reg(n, "bubbles")} position={[0, 0.1, 0.2]}>
         {[0, 1, 2, 3].map((i) => (

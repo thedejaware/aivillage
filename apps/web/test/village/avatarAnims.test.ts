@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { BODY_ANIMS, type ActionItem, type BodyAnim } from "@aivillage/shared";
 import {
-  BIKE, LIMB, PoseBlender, RIG_KEYS, SEATED_ANIMS, bikeCrank, faceFor, hipHeight, popcornBite, propFor, restRig, samplePose, seatLift,
+  BIKE, LIMB, PoseBlender, RIG_KEYS, SEATED_ANIMS, bikeCrank, chopLift, faceFor, hipHeight, popcornBite, propFor, restRig, samplePose, seatLift,
   type Rig, type RigKey
 } from "../../components/village/avatar/pose";
 import type { AvatarPose } from "../../components/village/avatar/types";
@@ -18,7 +18,7 @@ const sweep = (from: number, to: number, dt: number) => {
 };
 
 const NEW_ANIMS: BodyAnim[] = ["swim", "bike", "run", "lift", "dig", "watch", "ride"];
-const ITEMS: (ActionItem | null)[] = [null, "juice", "plate", "popcorn", "basket", "dumbbell"];
+const ITEMS: (ActionItem | null)[] = [null, "juice", "plate", "popcorn", "basket", "dumbbell", "book", "laptop", "dish"];
 
 /** Ankle (end of the shin) in the avatar's side plane: [z, y] relative to the avatar origin. */
 function ankle(r: Rig, side: "l" | "r"): [number, number] {
@@ -268,5 +268,109 @@ describe("lift transitions", () => {
       // an arm out to the side must either be bent in (hand close) or already overhead
       if (h.y < 0.08) expect(h.x, `t=${t.toFixed(2)} hand ${h.x.toFixed(3)},${h.y.toFixed(3)}`).toBeLessThan(0.16);
     }
+  });
+});
+
+const range = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+const LEFT_ARM: RigKey[] = ["lsf", "lso", "le", "lez", "lw"];
+
+describe("kitchen and library anims", () => {
+  const KL: BodyAnim[] = ["chop", "stir", "type"];
+
+  it("are real poses (not the idle fallback), loop without jumps, and keep standing feet on the floor", () => {
+    const idle = sample(pose("idle", 1.3));
+    for (const a of KL) {
+      const r = sample(pose(a, 1.3));
+      expect(RIG_KEYS.reduce((s, k) => s + Math.abs(r[k] - idle[k]), 0), a).toBeGreaterThan(1);
+      let prev: Rig | null = null;
+      for (const t of sweep(0, 30, 1 / 60)) {
+        const q = sample(pose(a, t));
+        if (prev) for (const k of RIG_KEYS) {
+          const step = Math.abs(q[k] - prev[k]);
+          if (step > 0.2) expect.fail(`${a}: ${k} jumps ${step.toFixed(3)} at ${t.toFixed(3)}s`);
+        }
+        prev = { ...q };
+        // standing: no leg work at all
+        expect(q.ltf + q.rtf + q.lk + q.rk, `${a}@${t}`).toBe(0);
+      }
+    }
+  });
+
+  it("chop: the knife hand goes up and down over the board, the other hand holds the food still", () => {
+    const rs = sweep(0, 6, 0.02).map((t) => sample(pose("chop", t)));
+    expect(range(rs.map((r) => r.re))).toBeGreaterThan(0.4); // the forearm chops
+    for (const k of LEFT_ARM) expect(range(rs.map((r) => r[k])), k).toBeLessThan(0.08);
+    for (const r of rs) {
+      expect(r.rsf).toBeGreaterThan(0.5); // hands forward, over the board
+      expect(r.lsf).toBeGreaterThan(0.5);
+      expect(r.hx).toBeGreaterThan(0.2); // eyes on the board
+    }
+    // chopLift: knife up (1) ↔ on the board (0), in step with the forearm
+    const lifts = sweep(0, 6, 0.02).map((t) => chopLift(t));
+    expect(Math.max(...lifts)).toBeGreaterThan(0.9);
+    expect(Math.min(...lifts)).toBeLessThan(0.1);
+    expect(propFor(pose("chop", 1))).toBe("knife");
+  });
+
+  it("stir: one hand circles over the pan, the other holds the pan's handle", () => {
+    const ts = sweep(0, 5, 0.02);
+    const rs = ts.map((t) => sample(pose("stir", t)));
+    expect(range(rs.map((r) => r.rsf))).toBeGreaterThan(0.15);
+    expect(range(rs.map((r) => r.rso))).toBeGreaterThan(0.15);
+    // a circle, not a line: the (rsf, rso) path encloses an area
+    let area = 0;
+    for (let i = 1; i < rs.length; i++) area += rs[i - 1].rsf * rs[i].rso - rs[i].rsf * rs[i - 1].rso;
+    expect(Math.abs(area / 2)).toBeGreaterThan(0.05);
+    for (const k of LEFT_ARM) expect(range(rs.map((r) => r[k])), k).toBeLessThan(0.08);
+    expect(propFor(pose("stir", 1))).toBe("spatula");
+  });
+
+  it("type: seated at the desk, both hands forward on the laptop, fingers tapping in turn", () => {
+    const rs = sweep(0, 8, 0.02).map((t) => sample(pose("type", t, { seated: true, item: "laptop" })));
+    for (const r of rs) {
+      expect(hipHeight(r)).toBeGreaterThan(0.29);
+      expect(hipHeight(r)).toBeLessThan(0.33);
+      expect(r.ltf).toBeGreaterThan(1.2);
+      expect(r.le).toBeGreaterThan(1);
+      expect(r.re).toBeGreaterThan(1);
+      expect(r.hx).toBeGreaterThan(0.15); // looking down at the screen
+    }
+    expect(range(rs.map((r) => r.lw))).toBeGreaterThan(0.1);
+    expect(range(rs.map((r) => r.rw))).toBeGreaterThan(0.1);
+    const together = rs.filter((r) => Math.abs(r.lw - r.rw) < 0.02).length;
+    expect(together).toBeLessThan(rs.length * 0.5); // the hands don't tap in sync
+    // both arms mirror: hands meet in front of the body
+    const r = rs[10];
+    expect(r.lsf).toBeCloseTo(r.rsf, 1);
+    expect(propFor(pose("type", 1, { item: "laptop", seated: true }))).toBe("laptop");
+    expect(propFor(pose("type", 1))).toBe("laptop");
+  });
+
+  it("faces concentrate while chopping, stirring and typing", () => {
+    for (const a of ["chop", "stir", "type"] as const) {
+      const faces = sweep(0, 10, 0.1).map((t) => faceFor(pose(a, t)));
+      expect(faces.some((f) => f.mouth === "flat" || f.mouth === "o"), a).toBe(true);
+    }
+  });
+});
+
+describe("items: book, laptop and the cooked dish", () => {
+  it("read + book shows the book; a seated reader keeps the read pose", () => {
+    expect(propFor(pose("read", 1, { item: "book", seated: true }))).toBe("book");
+  });
+
+  it("the dish: eaten like a plate, carried in one hand while walking to the table", () => {
+    expect(propFor(pose("eat", 1, { item: "dish", dish: "pasta" }))).toBe("dish");
+    for (const t of [0.3, 0.9, 1.3]) {
+      const dish = sample(pose("eat", t, { item: "dish", dish: "pasta", seated: true }));
+      const plate = sample(pose("eat", t, { item: "plate", seated: true }));
+      for (const k of RIG_KEYS) expect(dish[k], `${k}@${t}`).toBeCloseTo(plate[k], 6);
+    }
+    // carried: shown while walking, the holding arm stays still while the other swings
+    expect(propFor(pose("idle", 1, { walking: true, item: "dish", dish: "steak" }))).toBe("dish");
+    const carry = [0.5, 0.9, 1.3].map((t) => sample(pose("idle", t, { walking: true, walkPhase: t * 8, item: "dish", dish: "steak" })));
+    for (const r of carry) expect(r.le).toBeGreaterThan(1.2);
+    expect(Math.abs(carry[0].lsf - carry[1].lsf)).toBeLessThan(0.05);
+    expect(Math.abs(carry[0].rsf - carry[1].rsf)).toBeGreaterThan(0.1);
   });
 });

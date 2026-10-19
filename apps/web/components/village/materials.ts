@@ -47,7 +47,9 @@ export const ZONE_ACCENT: Record<string, string> = {
   gym: "#e2574c",
   pool: "#2a9fe0",
   cinema: "#b84fd6",
-  funfair: "#f5a623"
+  funfair: "#f5a623",
+  kitchen: "#e8743b",
+  library: "#5b6bd6"
 };
 
 export const FLOWER_COLORS = ["#ff8fa3", "#ffd27a", "#ffffff", "#b9a5ff", "#ff9a4d"] as const;

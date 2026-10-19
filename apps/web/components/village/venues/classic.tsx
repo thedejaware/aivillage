@@ -12,6 +12,7 @@ import { P, ZONE_ACCENT, beam, cachedGeo, decal, flatSlab, glow, solid } from ".
 import { Ball, Box, Cyl, FlowerBed, LampPost, ParkBench, RBox, Tree, type V3 } from "../parts";
 import { GRASS_TOP, PAD_RADIUS, PAD_TOP, ROAD_W, STAGE_TOP, isClear, roadDist } from "../scenery";
 import { CAFE_BUILDING } from "../decor";
+import { QUIET_PROPS } from "./placeProps";
 import { Parasol, StringLights, VenuePad, circleShape, local } from "./common";
 
 // ---------------- THE CAFÉ ----------------
@@ -313,12 +314,13 @@ export function Lawn() {
 
 // ---------------- QUIET CORNER ----------------
 
-export const QUIET_LAMP: Pt = { x: 0.9, z: -0.3 };
+export const QUIET_LAMP: Pt = { x: QUIET_PROPS.lamp.x, z: QUIET_PROPS.lamp.z };
 
+/** Bench east of the path (street ↔ library) that runs through the middle; lamp at its front-right, tree + flowers west. */
 export function QuietCorner() {
   const zone = "network_hub";
   const c = zoneCenter(zone);
-  const tree: Pt = { x: -0.95, z: -0.62 };
+  const tree: Pt = QUIET_PROPS.tree;
   const treeOk = isClear({ x: tree.x + c.x, z: tree.z + c.z }, 0.15, { pads: false });
   return (
     <group position={[c.x, 0, c.z]}>
@@ -327,7 +329,7 @@ export function QuietCorner() {
       <RBox size={[0.95, 0.22, 0.17]} radius={0.08} p={[BENCH.x, PAD_TOP + 0.11, BENCH.z - 0.42]} m={solid(P.foliageDark, 0.9, true)} />
       <LampPost x={QUIET_LAMP.x} z={QUIET_LAMP.z} y={PAD_TOP} h={1.25} />
       {treeOk && <Tree x={tree.x} z={tree.z} y={PAD_TOP} kind="tall" s={1.1} />}
-      <FlowerBed x={0.75} z={0.35} w={0.36} d={0.36} seed={5} />
+      <FlowerBed x={QUIET_PROPS.flowers.x} z={QUIET_PROPS.flowers.z} w={0.36} d={0.36} seed={5} />
     </group>
   );
 }

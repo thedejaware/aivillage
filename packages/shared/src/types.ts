@@ -44,7 +44,7 @@ export interface TwinPose {
 }
 
 /** The current map (Main Street). Bump when the map changes so old saved poses are ignored. */
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
 
 export interface Wallet {
   userId: string;

@@ -4,7 +4,7 @@
  * nobody watches.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { PLACES, actHoldMs, findAction, type Chattiness, type LlmClient, type OwnerOrder } from "@aivillage/shared";
+import { PLACES, actHoldMs, findAction, kitchenEnergyPhases, type Chattiness, type LlmClient, type OwnerOrder } from "@aivillage/shared";
 import { startTestDb, type TestDb } from "../db/helpers.js";
 import { startNextStepLoop } from "../../src/sim/nextStepLoop.js";
 import { claimTwins, releaseTwins } from "../../src/sim/twinLocks.js";
@@ -221,6 +221,31 @@ describe("startNextStepLoop", () => {
     expect(mem.some((m) => m.kind === "act")).toBe(true);
   });
 
+  it("a cook step: the dish rides on the order with the kitchen's energy phases; the partner cooks the same dish", async () => {
+    const memo = await addTwin("Memo", { stamina: 80, createdSec: 1 });
+    const sena = await addTwin("Sena", { stamina: 60, createdSec: 2 });
+    await sql().unsafe(`insert into relationships (from_twin_id, to_twin_id, score) values ('${sena}', '${memo}', 20)`);
+    const cook = JSON.stringify({ zone: "kitchen", action: "cook", dish: "pasta", partner: "Sena", narrative: "pasta night" });
+    const l = loop({ llm: fakeLlm({ Memo: cook }) });
+    await l.tick();
+    l.stop();
+    for (const [id, other] of [[memo, "Sena"], [sena, "Memo"]] as const) {
+      const t = await twin(id);
+      expect(t).toMatchObject({ locationZone: "kitchen", order: { zone: "kitchen", targetName: other, action: { id: "cook", dish: { name: "pasta", look: "pasta" } } } });
+      expect(t.order!.energyPhases).toEqual(kitchenEnergyPhases("pasta"));
+      expect(t.order!.energyTo ?? null).toBeNull();
+      expect(Date.parse(t.order!.holdUntil) - T0.getTime()).toBe(actHoldMs(findAction("cook")!));
+    }
+  });
+
+  it("a tired twin who planned to cook goes home to sleep instead", async () => {
+    const id = await addTwin("Memo", { stamina: 15 });
+    const l = loop({ llm: fakeLlm({ Memo: JSON.stringify({ zone: "kitchen", action: "cook", dish: "pasta", partner: null, narrative: "x" }) }) });
+    await l.tick();
+    l.stop();
+    expect((await twin(id)).order).toMatchObject({ zone: "home", action: { id: "sleep" }, energyTo: 100 });
+  });
+
   it("a partner who refuses stays out of it: the twin goes alone and remembers the no", async () => {
     const memo = await addTwin("Memo", { createdSec: 1 });
     const sena = await addTwin("Sena", { createdSec: 2 });
@@ -261,8 +286,9 @@ describe("to-do list mode: one AI call plans several activities", () => {
     await l.tick();
     l.stop();
     expect(llm.generate).toHaveBeenCalledTimes(2);
-    // each finished activity counted in full (nobody reported arrivals: a walk guess); the 4th just started
-    expect((await twin(id)).stamina).toBe(Math.min(100, 100 - 12 + 15) - 3);
+    // each finished activity counted from a walk guess (nobody reported arrivals); the 4th just started.
+    // The meal at the café gives only +4 (+1 per 15 s for 70 s), the swim −12, the movie −3.
+    expect((await twin(id)).stamina).toBe(100 - 12 + 4 - 3);
   });
 
   it("queued steps don't count against the per-minute AI cap", async () => {
@@ -293,8 +319,7 @@ describe("to-do list mode: one AI call plans several activities", () => {
     after(clock, actHoldMs(findAction("swim")!));
     await l.tick();
     const t = await twin(id);
-    expect(["maker_space", "network_hub"]).toContain(t.order!.zone);
-    expect(t.order!.energyTo).toBeGreaterThan(15);
+    expect(t.order).toMatchObject({ zone: "home", action: { id: "sleep" }, energyTo: 100 });
     expect(queuedSteps(id)).toEqual([]);
     after(clock, 200_000);
     await l.tick();

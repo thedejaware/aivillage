@@ -1,4 +1,4 @@
-import type { ActionItem, BodyAnim } from "@aivillage/shared";
+import type { ActionItem, BodyAnim, DishLook } from "@aivillage/shared";
 
 /** What the body is doing this frame. `pose()` returns one of these every frame. */
 export interface AvatarPose {
@@ -14,6 +14,8 @@ export interface AvatarPose {
   speed: number;
   /** something held (juice glass, plate, popcorn, basket, dumbbells); overrides the anim's own prop */
   item?: ActionItem | null;
+  /** the cooked dish's look, when `item` is "dish" (carried to the table, then eaten) */
+  dish?: DishLook | null;
   /**
    * On a seat (café chair, cinema seat, coaster cart): hips and legs sit, the upper body plays
    * `anim` (drink, eat, talk, cheer…). Ignored by the seated anims themselves and by swim/sleep.

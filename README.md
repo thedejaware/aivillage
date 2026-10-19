@@ -62,6 +62,8 @@ The village pauses when you close the app. When you open it again, every twin is
 |---|---|---|
 | 🏠 The house | sleep (they go inside; 💤 shows on the roof) | back to 100 |
 | 🌳 Quiet corner | read and rest on the bench | +20 |
+| 📚 The library | read in an armchair, or study / do homework / work on a laptop at a desk | read +1 every 35 s · study −1 every 60 s |
+| 🍳 The kitchen | cook a dish step by step — chop at the counter, cook in a pan, then eat it at the long table | cooking −1 every 10 s, eating +1 every 5 s (about −6, then +12) |
 | 🚲 The bikes | ride along the street and back | −8 |
 | ☕ The café | sit at a table, eat, drink coffee or fresh juice | +15 (juice +10) |
 | 🥕 The garden | dig, plant and pick vegetables — then juice at the café | −5 |
@@ -72,7 +74,7 @@ The village pauses when you close the app. When you open it again, every twin is
 | 🎬 The cinema | watch a movie under the sky, with popcorn | −3 |
 | 🎢 The rollercoaster | queue, ride, arms up on the drop 😱 | −8 |
 
-**Energy.** Every twin has energy from 0 to 100 (see it in the twin's card). Activities use it; resting gives it back. Energy changes only once the twin gets there, one point at a time: resting gives +1 every 4 seconds (the bar fills while you watch), tiring activities take −1 every 6 seconds. A twin sent home sleeps until its energy is full. Below 20 a twin is tired: it rests first (the house when it's nearly empty, otherwise the café or the quiet corner). If you tell a tired twin to do something tiring, it answers "I'm tired, let me rest first."
+**Energy.** Every twin has energy from 0 to 100 (see it in the twin's card). Activities use it; resting gives it back. Energy changes only once the twin gets there, one point at a time (the bar fills while you watch): sleeping at the house gives +1 every 4 seconds, other rest (a coffee, a book, the lawn) only +1 every 15 seconds, and tiring activities take −1 every 6 seconds. A twin sent home sleeps until its energy is full. The library and the kitchen have their own speeds (see the table). Below 20 a twin is tired: it goes home to sleep. If you tell a tired twin to do something tiring — cooking too, since cooking costs energy before the meal gives it back — it answers "I'm tired, let me rest first."
 
 **Talk to your twin.** Your main twin is you in the village. Chat with it at the bottom left. It remembers what you tell it, and it does what you ask, if it can:
 
@@ -84,6 +86,8 @@ The village pauses when you close the app. When you open it again, every twin is
 | `jump`, `dance`, `wave`, `take a nap` | does it |
 | `wash your hands`, `drink coffee`, `read a book` | walks to the right place and does it |
 | `go swimming`, `work out`, `ride a bike`, `watch a movie`, `ride the rollercoaster`, `pick vegetables`, `make juice`, `go to sleep` | goes there and does it |
+| `cook pasta`, `make a hamburger`, `cook something`, `cook steak with Sena` | goes to the kitchen, cooks it step by step and eats it at the long table (any dish works; "something" lets your twin choose) |
+| `go to the library`, `study`, `do homework`, `work on the laptop` | goes to the library to read or study |
 | `take Sena to the cinema` | invites Sena; both go — **if Sena agrees** |
 | `hug Sena`, `kiss Sena on the cheek`, `high five Omar` | walks to them and does it — **if they agree** |
 | `play the guitar` (anything else) | acts it out, if it is safe |

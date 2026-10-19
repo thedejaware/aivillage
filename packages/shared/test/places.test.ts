@@ -4,7 +4,7 @@ import {
   DEFAULT_ZONES, ZONE_DISPLAY, ZONE_EMOJI, MAX_STAMINA, TIRED_BELOW, EXHAUSTED_BELOW
 } from "../src/index.js";
 
-const ZONES = ["home", "network_hub", "maker_space", "garden", "plaza", "gym", "pool", "event_space", "cinema", "funfair", "bike_rack"];
+const ZONES = ["home", "network_hub", "maker_space", "garden", "plaza", "gym", "pool", "event_space", "cinema", "funfair", "bike_rack", "kitchen", "library"];
 
 describe("places", () => {
   it("every zone is a place with a name, an emoji and a tile", () => {
@@ -47,10 +47,16 @@ describe("stamina", () => {
     expect(isTired(19)).toBe(true);
     expect(isTired(20)).toBe(false);
   });
-  it("tired twins rest: the house when exhausted, else the café or the quiet corner", () => {
+  it("tired twins go home to sleep (café and quiet-corner rest is slow now)", () => {
     expect(restPlaceFor(5)).toBe("home");
-    expect(["maker_space", "network_hub"]).toContain(restPlaceFor(15, () => 0.2));
-    expect(["maker_space", "network_hub"]).toContain(restPlaceFor(15, () => 0.8));
+    expect(restPlaceFor(15)).toBe("home");
+  });
+
+  it("the kitchen and the library", () => {
+    expect(placeOf("kitchen")).toMatchObject({ capacity: 4, mainAction: "cook", restful: false, busy: false });
+    expect(placeOf("library")).toMatchObject({ capacity: 8, mainAction: "read_library", busy: true });
+    expect(ZONE_DISPLAY.kitchen).toBe("THE KITCHEN");
+    expect(ZONE_DISPLAY.library).toBe("THE LIBRARY");
   });
 });
 
@@ -58,7 +64,9 @@ describe("place actions", () => {
   it.each([
     ["go swimming", "swim"], ["swim", "swim"], ["work out", "work_out"], ["run", "run"], ["ride a bike", "ride_bike"],
     ["watch a movie", "watch_movie"], ["ride the rollercoaster", "ride_coaster"], ["pick vegetables", "garden"],
-    ["make juice", "drink_juice"], ["go to sleep", "sleep"]
+    ["make juice", "drink_juice"], ["go to sleep", "sleep"],
+    ["cook", "cook"], ["cook a meal", "cook"], ["study", "study"], ["do homework", "study"], ["work on the laptop", "study"],
+    ["read in the library", "read_library"], ["go to the library", "read_library"], ["read a book", "read"]
   ])("%s → %s", (name, id) => {
     expect(findAction(name)?.id).toBe(id);
   });
@@ -78,6 +86,8 @@ describe("place actions", () => {
     expect(staminaDelta(findAction("sunbathe")!)).toBe(10);
     expect(staminaDelta(findAction("hug")!)).toBe(0);
     expect(staminaDelta(findAction("jump")!)).toBe(0);
+    expect(staminaDelta(findAction("study")!)).toBe(-2); // studying costs; the library's +2 is for reading
+    expect(staminaDelta(findAction("read_library")!)).toBe(2);
   });
 
   it("'take Sena to the cinema': a place action keeps its partner", () => {

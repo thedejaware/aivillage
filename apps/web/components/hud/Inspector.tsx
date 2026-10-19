@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { ENERGY_GAIN_MS, MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
+import { MAX_STAMINA, TIRED_BELOW, ZONE_DISPLAY, ZONE_EMOJI, type TwinDetail } from "@aivillage/shared";
 import { C, FONT, Z, barStyle, caps, card, hex, iconButton, pill, relTime, type Tone } from "./theme";
 import { energyNow, friendsText, friendsTip, popularityText, popularityTip } from "../../lib/hud/stats";
 
@@ -194,11 +194,7 @@ export function Inspector({
               </span>
             </Row>
           )}
-          {live.charging && (
-            <div style={{ fontSize: 11, color: C.muted, textAlign: "right", marginTop: -3, paddingBottom: 4 }}>
-              Resting · +1 energy every {ENERGY_GAIN_MS / 1000} s
-            </div>
-          )}
+
           {goal && <Row label="Goal">{goal}</Row>}
 
           {detail.traits.length > 0 && (

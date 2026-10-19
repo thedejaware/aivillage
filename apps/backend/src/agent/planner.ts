@@ -1,9 +1,18 @@
 import { ACTIONS, PLACES, MAX_STAMINA, TIRED_BELOW, type Twin, type BeatResult, type Verb, type SocialMove, type LlmClient, type Memory } from "@aivillage/shared";
-import { staminaOf } from "../sim/activity.js";
+import { activityDelta, staminaOf } from "../sim/activity.js";
+import { cookEnergyText } from "./nextStepPlanner.js";
 
 const ACTION_LIST = ACTIONS.map((a) => (a.target ? `${a.id} (with someone)` : a.id)).join(", ");
-/** Every place with its energy effect, e.g. "pool (-25 energy)". */
-const PLACE_LIST = PLACES.map((p) => `${p.zone} (${p.zone === "home" ? "sleep: energy back to 100" : `${p.stamina > 0 ? "+" : ""}${p.stamina} energy`})`).join(", ");
+const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
+const studyDelta = activityDelta({ id: "study", place: "library" }, "library");
+
+/** Every place with its energy effect, e.g. "pool (-12 energy)"; the kitchen and the library per activity. */
+const PLACE_LIST = PLACES.map((p) => {
+  if (p.zone === "home") return `home (sleep: energy back to 100)`;
+  if (p.zone === "kitchen") return `kitchen (${cookEnergyText()})`;
+  if (p.zone === "library") return `library (read ${signed(p.stamina)} energy, study ${signed(studyDelta)} energy)`;
+  return `${p.zone} (${signed(p.stamina)} energy)`;
+}).join(", ");
 
 export interface PlanContext {
   nearbyTwinNames: string[];
@@ -26,7 +35,7 @@ export function buildPrompt(twin: Twin, ctx: PlanContext): string {
     `You are ${twin.name}, living in AiVillage — a small village buzzing with friendships, rivalries and gossip.`,
     `Personality: ${twin.traits.join(", ") || "unremarkable"}. Your social goal: ${twin.goals.join(", ") || "find your place"}.`,
     `You are at "${twin.locationZone}". Villagers around: ${ctx.nearbyTwinNames.join(", ") || "no one"}.`,
-    `Your energy: ${staminaOf(twin)}/100. Below ${TIRED_BELOW} you are tired: rest (café, quiet corner, lawn, sleep at home) instead of anything tiring.`,
+    `Your energy: ${staminaOf(twin)}/100. Below ${TIRED_BELOW} you are tired: go home and sleep instead of anything tiring (cooking too).`,
     `How you feel about people:\n${rels}`,
     ...(ctx.ownerFacts && ctx.ownerFacts.length > 0
       ? [

@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * The shared house at the west end of the street: a cosy gabled cottage
- * turned to face its door spot, warm windows that glow at night, and a
+ * The shared house at the west end of the street: a cosy gabled cottage with
+ * a lower side room on each side, turned to face its door spot, warm windows that glow at night, and a
  * floating 💤 sign above the roof while anyone sleeps inside.
  */
 import { useEffect, useMemo, useRef } from "react";
@@ -12,7 +12,7 @@ import { zoneCenter } from "../../../lib/village/layout";
 import { P, cachedGeo, glow, solid } from "../materials";
 import { Ball, Box, Bush, Cyl, RBox } from "../parts";
 import { PAD_TOP } from "../scenery";
-import { HOUSE_BODY, HOUSE_SCALE } from "../decor";
+import { HOUSE_BODY, HOUSE_SCALE, HOUSE_WING } from "../decor";
 import { VenuePad } from "./common";
 import { onScreen, type PlacesSim } from "./visibility";
 
@@ -49,22 +49,55 @@ function FlowerBox({ x, y, z }: { x: number; y: number; z: number }) {
   );
 }
 
-/** The cottage in its own frame: front (door) at +z. Drawn at its first size; House scales it up. */
-function Cottage() {
-  const w = HOUSE_BODY.w / HOUSE_SCALE, d = HOUSE_BODY.d / HOUSE_SCALE;
-  const slope = Math.atan2(ROOF_H, d / 2 + 0.1);
-  const slabLen = Math.hypot(ROOF_H, d / 2 + 0.1) + 0.06;
-  const gable = cachedGeo(`house-gable:${w}:${d}`, () => {
+/** A gable end: the triangle under a roof whose ridge runs along x. */
+function gableGeo(key: string, w: number, d: number, h: number): THREE.BufferGeometry {
+  return cachedGeo(key, () => {
     const s = new THREE.Shape();
     s.moveTo(-d / 2, 0);
     s.lineTo(d / 2, 0);
-    s.lineTo(0, ROOF_H * (d / 2) / (d / 2 + 0.1));
+    s.lineTo(0, h * (d / 2) / (d / 2 + 0.1));
     s.closePath();
     const g = new THREE.ExtrudeGeometry(s, { depth: w - 0.04, bevelEnabled: false });
     g.translate(0, 0, -(w - 0.04) / 2);
     g.rotateY(Math.PI / 2);
     return g;
   });
+}
+
+/** A side room on side `s` (−1 left, +1 right), in the house frame: lower walls and roof, its own windows. */
+function Wing({ s }: { s: -1 | 1 }) {
+  const { w, d, wallH, roofH } = HOUSE_WING;
+  const mainW = 1.4 * HOUSE_SCALE, mainD = 1.1 * HOUSE_SCALE;
+  const x = s * (mainW / 2 + w / 2 - 0.03);
+  const z = -(mainD - d) / 2 + 0.04; // a little set back from the main front
+  const slope = Math.atan2(roofH, d / 2 + 0.1);
+  const slabLen = Math.hypot(roofH, d / 2 + 0.1) + 0.05;
+  const wall = solid(WALL, 0.9);
+  const roof = solid(ROOF, 0.7);
+  const fz = d / 2;
+  return (
+    <group position={[x, 0, z]}>
+      <RBox size={[w + 0.06, 0.1, d + 0.1]} radius={0.03} p={[0, 0.05, 0]} m={solid("#e7e1f2", 0.9)} />
+      <RBox size={[w, wallH, d]} radius={0.05} p={[0, wallH / 2 + 0.05, 0]} m={wall} />
+      <mesh geometry={gableGeo(`house-wing-gable:${w}:${d}:${roofH}`, w, d, roofH)} position={[0, wallH + 0.04, 0]} material={wall} castShadow receiveShadow />
+      {[-1, 1].map((k) => (
+        <RBox key={k} size={[w + 0.12, 0.06, slabLen]} radius={0.03} p={[s * 0.03, wallH + 0.05 + roofH / 2 + 0.02, k * (d / 4 + 0.03)]} r={[k * slope, 0, 0]} m={roof} />
+      ))}
+      <RBox size={[w + 0.12, 0.06, 0.08]} radius={0.03} p={[s * 0.03, wallH + roofH + 0.07, 0]} m={solid("#6a5cd0", 0.7)} />
+      <Window x={0} y={0.48} z={fz} />
+      <FlowerBox x={0} y={0.31} z={fz + 0.05} />
+      <Window x={s * (w / 2)} y={0.48} z={0} ry={s * Math.PI / 2} />
+      <Window x={0} y={0.48} z={-fz} ry={Math.PI} />
+    </group>
+  );
+}
+
+/** The cottage in its own frame: front (door) at +z. Drawn at its first size; House scales it up. */
+function Cottage() {
+  const w = 1.4, d = 1.1;
+  const slope = Math.atan2(ROOF_H, d / 2 + 0.1);
+  const slabLen = Math.hypot(ROOF_H, d / 2 + 0.1) + 0.06;
+  const gable = gableGeo(`house-gable:${w}:${d}`, w, d, ROOF_H);
   const wall = solid(WALL, 0.9);
   const roof = solid(ROOF, 0.7);
   const wood = solid(P.wood, 0.75);
@@ -126,8 +159,10 @@ export function House() {
         <group scale={HOUSE_SCALE}>
           <Cottage />
         </group>
-        <Bush x={-HOUSE_BODY.w / 2 - 0.12} z={0.25} s={1.1} />
-        <Bush x={HOUSE_BODY.w / 2 + 0.1} z={-0.3} s={0.9} rot={1.2} />
+        <Wing s={-1} />
+        <Wing s={1} />
+        <Bush x={-HOUSE_BODY.w / 2 - 0.1} z={0.15} s={1.1} />
+        <Bush x={HOUSE_BODY.w / 2 + 0.08} z={-0.25} s={0.9} rot={1.2} />
       </group>
     </group>
   );

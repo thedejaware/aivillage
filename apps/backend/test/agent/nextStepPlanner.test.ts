@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { PLACES, PLAN_STEPS, type LlmClient, type Twin, type OwnerOrder } from "@aivillage/shared";
+import { KITCHEN_DISHES, PLACES, PLAN_STEPS, type LlmClient, type Twin, type OwnerOrder } from "@aivillage/shared";
 import {
   buildNextStepPrompt, parseNextStep, parseNextSteps, planNextSteps, ruleNextStep, placeOptions,
   type NextStepContext
@@ -166,9 +166,8 @@ describe("ruleNextStep (no AI)", () => {
     }
   });
 
-  it("a tired twin rests (café or quiet corner), an exhausted one goes home to sleep", () => {
-    const tired = ruleNextStep(me, ctxFor(15), () => 0.1);
-    expect(["maker_space", "network_hub"]).toContain(tired.zone);
+  it("a tired twin goes home to sleep", () => {
+    expect(ruleNextStep(me, ctxFor(15), () => 0.1)).toMatchObject({ zone: "home", action: "sleep" });
     expect(ruleNextStep(me, ctxFor(5), () => 0.1)).toMatchObject({ zone: "home", action: "sleep" });
   });
 
@@ -224,18 +223,81 @@ describe("planNextSteps (to-do list: one AI call → PLAN_STEPS activities)", ()
     const plan = '[{"zone":"gym","action":"work_out","partner":null,"narrative":"pump!"},{"zone":"pool","action":"swim","partner":null,"narrative":"x"}]';
     const steps = await planNextSteps(me, ctxFor(12), llmSaying(plan), { random: () => 0.1 });
     expect(steps).toHaveLength(1);
-    expect(["maker_space", "network_hub", "home"]).toContain(steps[0].zone);
+    expect(steps[0]).toMatchObject({ zone: "home", action: "sleep" });
   });
 
   it("energy is projected along the plan: the step that would tire the twin becomes rest", async () => {
     const plan = '[{"zone":"gym","action":"work_out","partner":null,"narrative":"a"},{"zone":"pool","action":"swim","partner":null,"narrative":"b"},{"zone":"cinema","action":"watch_movie","partner":null,"narrative":"c"}]';
     const steps = await planNextSteps(me, ctxFor(30), llmSaying(plan), { random: () => 0.1 });
     // 30 → gym 18 (tired) → the swim becomes rest, the plan stops there
-    expect(steps.map((s) => s.zone)).toEqual(["gym", "maker_space"]);
+    expect(steps.map((s) => s.zone)).toEqual(["gym", "home"]);
   });
 
   it("a restful AI step for a tired twin is kept", async () => {
     const steps = await planNextSteps(me, ctxFor(12), llmSaying('[{"zone":"event_space","action":"sit","partner":null,"narrative":"rest"}]'));
     expect(steps[0]).toMatchObject({ zone: "event_space", action: "sit" });
+  });
+});
+
+describe("the kitchen and the library in the plan", () => {
+  it("lists the kitchen (cook −6 then +12, name a dish) and the library (read up, study down)", () => {
+    const opts = placeOptions([], "me", NOW);
+    expect(opts.find((p) => p.zone === "kitchen")!.actions).toEqual([expect.objectContaining({ id: "cook", stamina: 6, tiring: true })]);
+    expect(opts.find((p) => p.zone === "library")!.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "read_library", stamina: 2, tiring: false }),
+      expect.objectContaining({ id: "study", stamina: -2, tiring: true })
+    ]));
+    const p = buildNextStepPrompt(me, ctxFor(80));
+    expect(p).toMatch(/cook \(cook a dish: -6 energy while cooking, then \+12 eating/);
+    expect(p).toContain("read_library (+2 energy)");
+    expect(p).toContain("study (-2 energy)");
+    expect(p).toContain('"dish"');
+  });
+
+  it("a tired twin is not offered cooking or studying", () => {
+    const p = buildNextStepPrompt(me, ctxFor(12));
+    expect(p).not.toContain("cook (");
+    expect(p).not.toContain("study (");
+    expect(p).toMatch(/home/);
+  });
+
+  it("a full kitchen (4 cooking) is not offered", () => {
+    const cooks = [1, 2, 3, 4].map((i) => mk(`k${i}`, { order: busyAt("kitchen") }));
+    expect(placeOptions(cooks, "me", NOW).some((p) => p.zone === "kitchen")).toBe(false);
+    expect(buildNextStepPrompt(me, ctxFor(80, cooks))).not.toContain("cook (");
+    expect(parseNextStep('{"zone":"kitchen","action":"cook","dish":"pasta","partner":null,"narrative":"x"}', ctxFor(80, cooks))).toBeNull();
+  });
+
+  it("reads the dish from a cook step; none named → one from the menu", () => {
+    const ctx = ctxFor(80);
+    expect(parseNextStep('{"zone":"kitchen","action":"cook","dish":"Cheese burger","partner":null,"narrative":"x"}', ctx))
+      .toMatchObject({ zone: "kitchen", action: "cook", dish: { name: "cheese burger", look: "burger" } });
+    const step = parseNextSteps('[{"zone":"kitchen","action":"cook","partner":null,"narrative":"x"}]', ctx, () => 0)[0];
+    expect(step.dish).toEqual(KITCHEN_DISHES[0]);
+    expect(parseNextStep('{"zone":"library","action":"study","partner":null,"narrative":"x"}', ctx)).toEqual({ zone: "library", action: "study", partner: null, narrative: "x" });
+  });
+
+  it("a tired twin's cook step becomes sleep at home (cooking costs energy first)", async () => {
+    const steps = await planNextSteps(me, ctxFor(15), llmSaying('[{"zone":"kitchen","action":"cook","dish":"pasta","partner":null,"narrative":"x"}]'));
+    expect(steps).toEqual([expect.objectContaining({ zone: "home", action: "sleep" })]);
+  });
+
+  it("energy along the plan counts a meal as +6", async () => {
+    const plan = '[{"zone":"kitchen","action":"cook","dish":"pasta","partner":null,"narrative":"a"},{"zone":"gym","action":"work_out","partner":null,"narrative":"b"},{"zone":"pool","action":"swim","partner":null,"narrative":"c"}]';
+    // 26 → meal 32 → gym 20 → swim allowed (not tired at 20)
+    const steps = await planNextSteps(me, ctxFor(26), llmSaying(plan));
+    expect(steps.map((s) => s.zone)).toEqual(["kitchen", "gym", "pool"]);
+  });
+
+  it("the rules can choose to cook (with a dish) or go to the library", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const r = (i * 0.618) % 1;
+      const step = ruleNextStep(me, ctxFor(80), () => r);
+      seen.add(step.action);
+      if (step.action === "cook") expect(KITCHEN_DISHES).toContainEqual(step.dish);
+    }
+    expect(seen.has("cook")).toBe(true);
+    expect(seen.has("read_library") || seen.has("study")).toBe(true);
   });
 });

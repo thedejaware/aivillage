@@ -2,7 +2,7 @@
 
 export type PlaceId =
   | "home" | "network_hub" | "maker_space" | "garden" | "plaza" | "gym"
-  | "pool" | "event_space" | "cinema" | "funfair" | "bike_rack";
+  | "pool" | "event_space" | "cinema" | "funfair" | "bike_rack" | "kitchen" | "library";
 
 export interface PlaceDef {
   zone: PlaceId;
@@ -29,8 +29,8 @@ export const EXHAUSTED_BELOW = 10;
 
 const p = (
   zone: PlaceId, label: string, emoji: string, stamina: number, capacity: number,
-  mainAction: string, opts: { busy?: boolean } = {}
-): PlaceDef => ({ zone, label, emoji, stamina, capacity, restful: stamina > 0 || zone === "home", busy: opts.busy ?? false, mainAction });
+  mainAction: string, opts: { busy?: boolean; restful?: boolean } = {}
+): PlaceDef => ({ zone, label, emoji, stamina, capacity, restful: opts.restful ?? (stamina > 0 || zone === "home"), busy: opts.busy ?? false, mainAction });
 
 export const PLACES: PlaceDef[] = [
   p("home", "the house", "🏠", 0, 10, "sleep", { busy: true }),
@@ -43,7 +43,11 @@ export const PLACES: PlaceDef[] = [
   p("event_space", "the lawn", "🌸", 10, 4, "sit"),
   p("cinema", "the cinema", "🎬", -3, 10, "watch_movie"),
   p("funfair", "the rollercoaster", "🎢", -8, 4, "ride_coaster", { busy: true }),
-  p("bike_rack", "the bikes", "🚲", -8, 4, "ride_bike", { busy: true })
+  p("bike_rack", "the bikes", "🚲", -8, 4, "ride_bike", { busy: true }),
+  // net over a meal (−6 cooking, +12 eating); cooking first costs energy, so it isn't a place to rest
+  p("kitchen", "the kitchen", "🍳", 6, 4, "cook", { restful: false }),
+  // reading +1 / 35 s (studying costs); a library is quiet: no conversations there
+  p("library", "the library", "📚", 2, 8, "read_library", { busy: true })
 ];
 
 export function placeOf(zone: string | null | undefined): PlaceDef | undefined {
@@ -61,8 +65,10 @@ export function isTired(stamina: number): boolean {
   return stamina < TIRED_BELOW;
 }
 
-/** Where a tired twin goes: home to sleep when exhausted, else the café or the quiet corner. */
-export function restPlaceFor(stamina: number, random: () => number = Math.random): PlaceId {
-  if (stamina < EXHAUSTED_BELOW) return "home";
-  return random() < 0.5 ? "maker_space" : "network_hub";
+/**
+ * Where a tired twin goes: home to sleep. Rest elsewhere (café, quiet corner)
+ * is slow (+1 / 15 s), so only sleep really brings a tired twin back.
+ */
+export function restPlaceFor(_stamina: number, _random: () => number = Math.random): PlaceId {
+  return "home";
 }

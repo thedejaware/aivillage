@@ -144,7 +144,7 @@ describe("buildChatTools", () => {
   });
   it("go_to only accepts real venues", () => {
     const place = (byName.get("go_to")!.input_schema as unknown as { properties: { place: { enum: string[] } } }).properties.place;
-    expect(place.enum.sort()).toEqual(["bike_rack", "cinema", "event_space", "funfair", "garden", "gym", "home", "maker_space", "network_hub", "plaza", "pool"]);
+    expect(place.enum.sort()).toEqual(["bike_rack", "cinema", "event_space", "funfair", "garden", "gym", "home", "kitchen", "library", "maker_space", "network_hub", "plaza", "pool"]);
   });
   it("talk_to only accepts real villagers", () => {
     const name = (byName.get("talk_to")!.input_schema as unknown as { properties: { name: { enum: string[] } } }).properties.name;
@@ -212,6 +212,17 @@ describe("do_action / talk_to message", () => {
   it("keeps a mime's own label and emoji", () => {
     const out = parseToolTurn({ text: "", toolCalls: [{ name: "do_action", input: { action: "play guitar", emoji: "🎸" } }] }, villagers);
     expect(out.command).toEqual({ type: "act", action: "play guitar", target: null, emoji: "🎸" });
+  });
+  it("do_action can cook a named dish", () => {
+    const tool = buildChatTools(villagers).find((t) => t.name === "do_action")!;
+    for (const id of ["cook", "read_library", "study"]) expect(tool.description).toContain(id);
+    const dish = (tool.input_schema as unknown as { properties: { dish: { description: string } } }).properties.dish;
+    expect(dish.description).toMatch(/cook/i);
+    expect(parseToolTurn({ text: "", toolCalls: [{ name: "do_action", input: { action: "cook", dish: "Pasta", target: "Aiko" } }] }, villagers).command)
+      .toEqual({ type: "act", action: "cook", target: "Aiko", dish: { name: "pasta", look: "pasta" } });
+    // the model wrote the dish into the action text
+    expect(parseToolTurn({ text: "", toolCalls: [{ name: "do_action", input: { action: "cook sushi" } }] }, villagers).command)
+      .toEqual({ type: "act", action: "cook", target: null, dish: { name: "sushi", look: "plate" } });
   });
   it("talk_to can carry a message to pass on", () => {
     const out = parseToolTurn({ text: "", toolCalls: [{ name: "talk_to", input: { name: "Aiko", message: "dinner is ready" } }] }, villagers);

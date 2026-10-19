@@ -34,7 +34,12 @@ export const SEAT_Y: Record<ActivityKind, number> = {
   cinema: PAD_TOP + 0.24,
   plot: GRASS_TOP,
   coaster: PAD_TOP,
-  bike: PAD_TOP
+  bike: PAD_TOP,
+  counter: PAD_TOP,
+  stove: PAD_TOP,
+  table: PAD_TOP + 0.24,
+  armchair: PAD_TOP + 0.22,
+  desk: PAD_TOP + 0.24
 };
 
 /** Radius of the paved pad (or lawn) around each venue's centre. */
@@ -49,7 +54,9 @@ export const PAD_RADIUS: Record<string, number> = {
   event_space: 1.9,
   pool: 3.0,
   cinema: 2.3,
-  funfair: 2.0
+  funfair: 2.0,
+  kitchen: 2.3,
+  library: 1.9
 };
 
 /** The road node that sits at each place's centre. */
@@ -63,7 +70,9 @@ export const NODE_ZONE: Record<string, string> = {
   GYM: "gym",
   LAWN: "event_space",
   POOL: "pool",
-  CINEMA: "cinema"
+  CINEMA: "cinema",
+  KITCHEN: "kitchen",
+  LIBRARY: "library"
 };
 
 export interface Pad extends Pt { zone: string; r: number }

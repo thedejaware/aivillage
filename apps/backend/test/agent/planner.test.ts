@@ -32,6 +32,16 @@ describe("buildPrompt", () => {
   });
 });
 
+describe("buildPrompt: places and rest", () => {
+  it("lists the kitchen and the library with their net effects; tired twins sleep at home", () => {
+    const p = buildPrompt(twin(), { nearbyTwinNames: [], recentMemories: [] });
+    expect(p).toMatch(/kitchen \(cook a dish: -6 energy while cooking, then \+12 eating\)/);
+    expect(p).toMatch(/library \(read \+2 energy, study -2 energy\)/);
+    expect(p).toMatch(/tired: go home and sleep/);
+    expect(p).not.toMatch(/rest \(café/);
+  });
+});
+
 describe("parseBeat (social verbs)", () => {
   it("parses a chat beat", () => {
     const r = parseBeat('{"verb":"chat","target":"Lena","kind":null,"narrative":"Says hi."}');
